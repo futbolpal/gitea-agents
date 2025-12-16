@@ -13,7 +13,7 @@ def main():
     try:
         print("Building Docker image...")
         subprocess.run([
-            "podman", "build", "--platform", "linux/arm64/v8", "-t", f"{image_name}:{tag}", "."
+            "podman", "build", "--platform", "linux/amd64", "-t", f"{image_name}:{tag}", "."
         ], check=True)
 
         print("Tagging image for registry...")
