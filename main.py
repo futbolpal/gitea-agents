@@ -16,11 +16,21 @@ def main():
 
     # Validate API connection
     try:
+        logger.debug(f"Validating API connection with base_url: {client.base_url}")
+        logger.debug(f"GITEA_REPOS: {config.gitea_repos}")
+        if not config.gitea_repos:
+            logger.error("No repositories configured")
+            return
+        first_repo = config.gitea_repos[0]
+        logger.debug(f"Using first repo for validation: {first_repo}")
+        owner, repo_name = first_repo.split('/', 1)
+        logger.debug(f"Parsed owner: {owner}, repo: {repo_name}")
         # Basic API connectivity check
-        client.get_issues(config.gitea_repos[0].split('/')[0], config.gitea_repos[0].split('/')[1], state='open', limit=1)
+        client.get_issues(owner, repo_name, state='open', limit=1)
         logger.info("API connection validated successfully")
     except Exception as e:
         logger.error(f"Failed to validate API connection: {e}")
+        logger.debug(f"Exception type: {type(e).__name__}, details: {e}")
         return
 
     running = True
