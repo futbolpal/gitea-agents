@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Script to build, tag, and push kilo-agent Docker image using podman."""
+"""Script to build, tag, and push kilo-agents Docker image using podman."""
 
 import subprocess
 import sys
@@ -13,7 +13,7 @@ def main():
     try:
         print("Building Docker image...")
         subprocess.run([
-            "podman", "build", "-t", f"{image_name}:{tag}", "."
+            "podman", "build", "--platform", "linux/arm64/v8", "-t", f"{image_name}:{tag}", "."
         ], check=True)
 
         print("Tagging image for registry...")

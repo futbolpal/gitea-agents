@@ -16,7 +16,7 @@ authors = [
 ]
 
 [project.scripts]
-build-image = "build_image:main"
+ship-image = "ship_image:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

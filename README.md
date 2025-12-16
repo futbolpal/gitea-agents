@@ -70,12 +70,12 @@ Set the following environment variables:
 1. Build and push the image:
    ```bash
    pip install -e .
-   build-image
+   ship-image
    ```
 
    Or manually:
    ```bash
-   podman build -t kilo-agents:latest .
+   podman build --platform linux/arm64/v8 -t kilo-agents:latest .
    podman tag kilo-agents:latest homenas.tail38254.ts.net:5001/kilo-agents:latest
    podman push homenas.tail38254.ts.net:5001/kilo-agents:latest
    ```
