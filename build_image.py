@@ -5,8 +5,8 @@ import subprocess
 import sys
 
 def main():
-    """Build, tag, and push the kilo-agent image."""
-    image_name = "kilo-agent"
+    """Build, tag, and push the kilo-agents image."""
+    image_name = "kilo-agents"
     tag = "latest"
     registry = "homenas.tail38254.ts.net:5001"
 

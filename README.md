@@ -75,14 +75,14 @@ Set the following environment variables:
 
    Or manually:
    ```bash
-   podman build -t kilo-agent:latest .
-   podman tag kilo-agent:latest homenas.tail38254.ts.net:5001/kilo-agent:latest
-   podman push homenas.tail38254.ts.net:5001/kilo-agent:latest
+   podman build -t kilo-agents:latest .
+   podman tag kilo-agents:latest homenas.tail38254.ts.net:5001/kilo-agents:latest
+   podman push homenas.tail38254.ts.net:5001/kilo-agents:latest
    ```
 
 2. Run the container:
    ```bash
-   podman run -e GITEA_BASE_URL=... -e GITEA_TOKEN=... -e GITEA_REPOS=... homenas.tail38254.ts.net:5001/kilo-agent:latest
+   podman run -e GITEA_BASE_URL=... -e GITEA_TOKEN=... -e GITEA_REPOS=... homenas.tail38254.ts.net:5001/kilo-agents:latest
    ```
 
 ### Local Development
