@@ -69,8 +69,9 @@ class GiteaClient:
     def update_issue_labels(self, owner, repo, issue_number, labels):
         """Update labels on an issue."""
         url = f'{self.base_url}/repos/{owner}/{repo}/issues/{issue_number}/labels'
+        data = {'labels': labels}
         logger.info(f"Updating labels for issue #{issue_number} in {owner}/{repo}")
-        return self._make_request('PUT', url, json=labels)
+        return self._make_request('PUT', url, json=data)
 
     def get_pulls(self, owner, repo, state='open'):
         """Get pull requests for a repository."""
