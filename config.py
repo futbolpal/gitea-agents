@@ -5,6 +5,10 @@ from logging.handlers import RotatingFileHandler
 class Config:
     def __init__(self):
         self.gitea_base_url = os.getenv('GITEA_BASE_URL')
+        if self.gitea_base_url:
+            self.gitea_base_url = self.gitea_base_url.rstrip('/')
+            if not self.gitea_base_url.endswith('/api/v1'):
+                self.gitea_base_url += '/api/v1'
         self.gitea_token = os.getenv('GITEA_TOKEN')
         self.gitea_repos = [repo.strip() for repo in os.getenv('GITEA_REPOS', '').split(',') if repo.strip()]
         self.polling_frequency = int(os.getenv('POLLING_FREQUENCY', '60'))
