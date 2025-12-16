@@ -52,7 +52,7 @@ class GiteaClient:
 
     def get_issues(self, owner, repo, state='open', labels=None):
         """Get issues for a repository."""
-        url = f'{self.base_url}/api/v1/repos/{owner}/{repo}/issues'
+        url = f'{self.base_url}/repos/{owner}/{repo}/issues'
         params = {'state': state}
         if labels:
             params['labels'] = ','.join(labels)
@@ -61,21 +61,20 @@ class GiteaClient:
 
     def update_issue_labels(self, owner, repo, issue_number, labels):
         """Update labels on an issue."""
-        url = f'{self.base_url}/api/v1/repos/{owner}/{repo}/issues/{issue_number}'
-        data = {'labels': labels}
+        url = f'{self.base_url}/repos/{owner}/{repo}/issues/{issue_number}/labels'
         logger.info(f"Updating labels for issue #{issue_number} in {owner}/{repo}")
-        return self._make_request('PATCH', url, json=data)
+        return self._make_request('PUT', url, json=labels)
 
     def get_pulls(self, owner, repo, state='open'):
         """Get pull requests for a repository."""
-        url = f'{self.base_url}/api/v1/repos/{owner}/{repo}/pulls'
+        url = f'{self.base_url}/repos/{owner}/{repo}/pulls'
         params = {'state': state}
         logger.info(f"Getting pull requests for {owner}/{repo} with state={state}")
         return self._make_request('GET', url, params=params)
 
     def create_pull_request(self, owner, repo, title, head, base, body=''):
         """Create a pull request."""
-        url = f'{self.base_url}/api/v1/repos/{owner}/{repo}/pulls'
+        url = f'{self.base_url}/repos/{owner}/{repo}/pulls'
         data = {
             'title': title,
             'head': head,
@@ -87,31 +86,31 @@ class GiteaClient:
 
     def get_pull_comments(self, owner, repo, pull_number):
         """Get comments on a pull request."""
-        url = f'{self.base_url}/api/v1/repos/{owner}/{repo}/pulls/{pull_number}/comments'
+        url = f'{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}/comments'
         logger.debug(f"Getting comments for PR #{pull_number} in {owner}/{repo}")
         return self._make_request('GET', url)
 
     def get_pull_request(self, owner, repo, pull_number):
         """Get a specific pull request."""
-        url = f'{self.base_url}/api/v1/repos/{owner}/{repo}/pulls/{pull_number}'
+        url = f'{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}'
         logger.debug(f"Getting PR #{pull_number} details from {owner}/{repo}")
         return self._make_request('GET', url)
 
     def create_pull_comment(self, owner, repo, pull_number, body):
         """Create a comment on a pull request."""
-        url = f'{self.base_url}/api/v1/repos/{owner}/{repo}/pulls/{pull_number}/comments'
+        url = f'{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}/comments'
         data = {'body': body}
         logger.info(f"Creating comment on PR #{pull_number} in {owner}/{repo}")
         return self._make_request('POST', url, json=data)
 
     def get_issue(self, owner, repo, issue_number):
         """Get a specific issue."""
-        url = f'{self.base_url}/api/v1/repos/{owner}/{repo}/issues/{issue_number}'
+        url = f'{self.base_url}/repos/{owner}/{repo}/issues/{issue_number}'
         logger.debug(f"Getting issue #{issue_number} from {owner}/{repo}")
         return self._make_request('GET', url)
 
     def get_repo(self, owner, repo):
         """Get repository details."""
-        url = f'{self.base_url}/api/v1/repos/{owner}/{repo}'
+        url = f'{self.base_url}/repos/{owner}/{repo}'
         logger.debug(f"Getting repo details for {owner}/{repo}")
         return self._make_request('GET', url)
