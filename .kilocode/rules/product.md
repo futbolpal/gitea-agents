@@ -15,7 +15,6 @@ For each qualifying issue, the agent:
 
 - reserves the issue by tagging with ISSUE_LABEL_RESERVE
 - spawns a subagent to complete the task.
-- when a PR is merged, the associated issue should be tagged with ISSUE_LABEL_ACCEPTANCE
 
 When the subagent completes its work, it creates a pull request (PR).
 The subagent then begins polling for comments on the PR.
@@ -53,9 +52,8 @@ The orchestration layer (main agent) manages the overall process of monitoring r
 
 #### 5. PR Merge Handling
 - Poll for merged PRs associated with issues.
-- When a PR is merged:
-  - Tag the corresponding issue with ISSUE_LABEL_ACCEPTANCE.
-  - Clean up any subagent resources if applicable.
+- When a PR is merged, the associated issue is automatically closed (if PR contains 'Closes #issue').
+- Clean up any subagent resources if applicable.
 
 #### 6. Error Handling
 - Handle API failures (e.g., retry with backoff).
@@ -71,7 +69,7 @@ The orchestration layer (main agent) manages the overall process of monitoring r
 Agent Start -> Load Config -> Validate API
 Loop: Poll Issues -> Filter Qualifying -> Reserve Issue -> Spawn Subagent
 Subagent: Work -> Create PR -> Poll Comments -> Respond
-PR Merged -> Tag Issue Acceptance -> Cleanup
+PR Merged -> Issue Closed -> Cleanup
 ```
 
 ## Configuration
@@ -80,4 +78,3 @@ PR Merged -> Tag Issue Acceptance -> Cleanup
 - GITEA_REPOS - comma-delimited list of repositories to monitor (e.g., "owner/repo1,owner/repo2")
 - POLLING_FREQUENCY - frequency in seconds for checking issues and PR comments (default: 60)
 - ISSUE_LABEL_RESERVE - label applied to issues being worked on by a subagent (e.g., "agent-working")
-- ISSUE_LABEL_ACCEPTANCE - the label applied to issues where the work has been done but the owner should review.
