@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kilo-agent"
+version = "0.1.0"
+description = "Autonomous agent for Gitea issue resolution using AI"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "requests",
+]
+authors = [
+    {name = "Kilo Agent Team"},
+]
+
+[project.scripts]
+build-image = "build_image:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["*"]
+
+[tool.setuptools.package-dir]
+"" = "."
