@@ -35,8 +35,8 @@ def main():
 
     # Ensure required labels exist in all repositories
     required_labels = [
-        {"name": config.issue_label_reserve, "color": "#ffa500", "description": "Issue being worked on by agent"},
-        {"name": config.issue_label_acceptance, "color": "#008000", "description": "Work completed and ready for review"}
+        {"name": config.issue_label_reserve, "color": "ffa500", "description": "Issue being worked on by agent"},
+        {"name": config.issue_label_acceptance, "color": "008000", "description": "Work completed and ready for review"}
     ]
     for repo in config.gitea_repos:
         owner, repo_name = repo.split('/', 1)
