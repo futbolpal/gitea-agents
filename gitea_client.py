@@ -34,8 +34,13 @@ class GiteaClient:
                     logger.warning(f"Rate limited for {method} {url}, retrying")
                 else:
                     # Client error, don't retry
-                    logger.error(f"Client error {response.status_code} for {method} {url}: {e}")
-                    raise
+                    try:
+                        error_data = response.json()
+                        error_msg = error_data.get('message', response.text)
+                    except:
+                        error_msg = response.text
+                    logger.error(f"Client error {response.status_code} for {method} {url}: {error_msg}")
+                    raise Exception(f"API Error {response.status_code}: {error_msg}")
             except (Timeout, ConnectionError) as e:
                 logger.warning(f"Network error for {method} {url}: {e}")
             except RequestException as e:
@@ -115,4 +120,21 @@ class GiteaClient:
         """Get repository details."""
         url = f'{self.base_url}/repos/{owner}/{repo}'
         logger.debug(f"Getting repo details for {owner}/{repo}")
+        return self._make_request('GET', url)
+
+    def create_label(self, owner, repo, name, color="#ffffff", description=""):
+        """Create a label in the repository."""
+        url = f'{self.base_url}/repos/{owner}/{repo}/labels'
+        data = {
+            "name": name,
+            "color": color,
+            "description": description
+        }
+        logger.info(f"Creating label '{name}' in {owner}/{repo}")
+        return self._make_request('POST', url, json=data)
+
+    def get_labels(self, owner, repo):
+        """Get all labels for a repository."""
+        url = f'{self.base_url}/repos/{owner}/{repo}/labels'
+        logger.debug(f"Getting labels for {owner}/{repo}")
         return self._make_request('GET', url)

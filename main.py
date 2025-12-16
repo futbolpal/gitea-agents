@@ -33,6 +33,26 @@ def main():
         logger.debug(f"Exception type: {type(e).__name__}, details: {e}")
         return
 
+    # Ensure required labels exist in all repositories
+    required_labels = [
+        {"name": config.issue_label_reserve, "color": "#ffa500", "description": "Issue being worked on by agent"},
+        {"name": config.issue_label_acceptance, "color": "#008000", "description": "Work completed and ready for review"}
+    ]
+    for repo in config.gitea_repos:
+        owner, repo_name = repo.split('/', 1)
+        try:
+            existing_labels = client.get_labels(owner, repo_name)
+            existing_names = {label['name'] for label in existing_labels}
+            for label in required_labels:
+                if label['name'] not in existing_names:
+                    try:
+                        client.create_label(owner, repo_name, **label)
+                        logger.info(f"Created label '{label['name']}' in {repo}")
+                    except Exception as e:
+                        logger.warning(f"Failed to create label '{label['name']}' in {repo}: {e}")
+        except Exception as e:
+            logger.error(f"Failed to check/create labels in {repo}: {e}")
+
     running = True
     active_subprocesses = []
 
