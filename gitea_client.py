@@ -58,7 +58,7 @@ class GiteaClient:
     def get_issues(self, owner, repo, state='open', labels=None, limit=None):
         """Get issues for a repository."""
         url = f'{self.base_url}/repos/{owner}/{repo}/issues'
-        params = {'state': state}
+        params = {'state': state, 'type': 'issues'}
         if labels:
             params['labels'] = ','.join(labels)
         if limit:
