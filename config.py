@@ -2,6 +2,15 @@ import os
 import logging
 from logging.handlers import RotatingFileHandler
 
+class CustomFormatter(logging.Formatter):
+    def __init__(self, process_type, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.process_type = process_type
+
+    def format(self, record):
+        record.process_type = self.process_type
+        return super().format(record)
+
 class Config:
     def __init__(self):
         self.gitea_base_url = os.getenv('GITEA_BASE_URL')
@@ -18,6 +27,7 @@ class Config:
         self.log_file = os.getenv('LOG_FILE', 'kilocode_agent.log')
         self.max_log_size = int(os.getenv('MAX_LOG_SIZE', '10485760'))  # 10MB default
         self.backup_count = int(os.getenv('LOG_BACKUP_COUNT', '5'))
+        self.process_type = os.getenv('PROCESS_TYPE', 'unknown')
 
     def setup_logging(self):
         """Setup logging configuration with console and file handlers."""
@@ -26,8 +36,9 @@ class Config:
         logger.setLevel(getattr(logging, self.log_level, logging.INFO))
 
         # Create formatter
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        formatter = CustomFormatter(
+            self.process_type,
+            '%(asctime)s - [%(process_type)s] - %(levelname)s - %(message)s'
         )
 
         # Console handler

@@ -2,11 +2,13 @@ import time
 import signal
 import subprocess
 import logging
+import os
 import atexit
 from config import Config
 from gitea_client import GiteaClient
 
 def main():
+    os.environ['PROCESS_TYPE'] = 'main'
     config = Config()
     config.validate()
     logger = config.setup_logging()
@@ -93,16 +95,16 @@ def main():
                     labels = [label['name'] for label in issue.get('labels', [])]
                     if config.issue_label_reserve not in labels and config.issue_label_acceptance not in labels:
                         logger.info(f"Reserving issue {issue['number']} in {repo}")
-                        # Reserve the issue
-                        new_labels = labels + [config.issue_label_reserve]
-                        client.update_issue_labels(owner, repo_name, issue['number'], new_labels)
-                        # Spawn subagent
                         try:
+                            # Reserve the issue
+                            new_labels = labels + [config.issue_label_reserve]
+                            client.update_issue_labels(owner, repo_name, issue['number'], new_labels)
+                            # Spawn subagent
                             proc = subprocess.Popen(['python', 'subagent.py', str(issue['number']), repo])
                             active_subprocesses.append(proc)
                             logger.info(f"Spawned subagent for issue {issue['number']} in {repo} (PID: {proc.pid})")
-                        except subprocess.SubprocessError as e:
-                            logger.error(f"Failed to spawn subagent for issue {issue['number']}: {e}")
+                        except Exception as e:
+                            logger.error(f"Failed to reserve or spawn subagent for issue {issue['number']}: {e}")
             except Exception as e:
                 logger.error(f"Error processing repo {repo}: {e}")
 

@@ -44,6 +44,7 @@ def do_work(issue_body, repo_dir):
     logger.info("Starting work on issue...")
     # Add instructions for commit and test management
     enhanced_prompt = (
+        "Do not create any new issues or pull requests. Only make code changes as requested.\n"
         "Create small, focused commits for each logical change. Run all tests and ensure they pass before pushing the branch to the remote repository and finalizing the PR. Make multiple commits if needed for the PR.\n\n"
         + issue_body
     )
@@ -65,6 +66,7 @@ def main():
         print(f"Invalid arguments: {e}", file=sys.stderr)
         sys.exit(1)
 
+    os.environ['PROCESS_TYPE'] = 'subagent'
     config = Config()
     config.validate()
     logger = config.setup_logging()
@@ -111,6 +113,12 @@ def main():
         logger.info(f"Working on issue {issue_number}: {issue['title']}")
     except Exception as e:
         logger.error(f"Failed to get issue details: {e}")
+        sys.exit(1)
+
+    # Verify the issue is reserved for processing
+    labels = [label['name'] for label in issue.get('labels', [])]
+    if config.issue_label_reserve not in labels:
+        logger.error(f"Issue {issue_number} is not properly reserved for processing (missing {config.issue_label_reserve} label)")
         sys.exit(1)
 
     # Clone the repository
