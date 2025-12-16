@@ -50,13 +50,15 @@ class GiteaClient:
         logger.error(f"Failed to complete request after {self.max_retries + 1} attempts: {method} {url}")
         raise RequestException(f"Failed to complete request after retries: {method} {url}")
 
-    def get_issues(self, owner, repo, state='open', labels=None):
+    def get_issues(self, owner, repo, state='open', labels=None, limit=None):
         """Get issues for a repository."""
         url = f'{self.base_url}/repos/{owner}/{repo}/issues'
         params = {'state': state}
         if labels:
             params['labels'] = ','.join(labels)
-        logger.info(f"Getting issues for {owner}/{repo} with state={state}")
+        if limit:
+            params['limit'] = limit
+        logger.info(f"Getting issues for {owner}/{repo} with state={state}, limit={limit}")
         return self._make_request('GET', url, params=params)
 
     def update_issue_labels(self, owner, repo, issue_number, labels):
