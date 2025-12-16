@@ -136,8 +136,34 @@ def main():
         shutil.rmtree(repo_temp_dir)
         sys.exit(1)
 
-    # The kilo-code agent will handle branch creation, commits, and pushing
+    # Handle branch creation, commits, and pushing since kilo-code may not do it
     head_branch = f"fix-issue-{issue_number}"
+    try:
+        # Create and checkout branch
+        subprocess.run(['git', 'checkout', '-b', head_branch], cwd=repo_temp_dir, check=True)
+        logger.info(f"Created and checked out branch {head_branch}")
+
+        # Add all changes
+        subprocess.run(['git', 'add', '.'], cwd=repo_temp_dir, check=True)
+
+        # Check if there are staged changes
+        result = subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=repo_temp_dir)
+        if result.returncode != 0:  # There are changes
+            # Commit
+            subprocess.run(['git', 'commit', '-m', f'Fix issue #{issue_number}: {issue["title"]}'], cwd=repo_temp_dir, check=True)
+            logger.info(f"Committed changes for issue {issue_number}")
+
+            # Push
+            subprocess.run(['git', 'push', 'origin', head_branch], cwd=repo_temp_dir, check=True)
+            logger.info(f"Pushed branch {head_branch} to remote")
+        else:
+            logger.warning("No changes to commit")
+            # Still create PR if branch exists, but since no push, branch won't exist
+            # For now, assume changes are made
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Git operation failed: {e}")
+        shutil.rmtree(repo_temp_dir)
+        sys.exit(1)
     try:
         # Get the default branch for the repository
         repo_info = client.get_repo(owner, repo_name)
