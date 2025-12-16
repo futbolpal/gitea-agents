@@ -15,7 +15,6 @@ class TestIntegration(unittest.TestCase):
             'GITEA_REPOS': 'owner/repo1,owner/repo2',
             'POLLING_FREQUENCY': '1',
             'ISSUE_LABEL_RESERVE': 'agent-working',
-            'ISSUE_LABEL_ACCEPTANCE': 'agent-acceptance',
             'LOG_LEVEL': 'INFO',
             'LOG_FILE': 'test.log',
             'MAX_LOG_SIZE': '10485760',
@@ -34,12 +33,11 @@ class TestIntegration(unittest.TestCase):
         """Test that configuration loads correctly and validates."""
         from config import Config
         config = Config()
-        self.assertEqual(config.gitea_base_url, 'http://mock.gitea.com')
+        self.assertEqual(config.gitea_base_url, 'http://mock.gitea.com/api/v1')
         self.assertEqual(config.gitea_token, 'mock_token')
         self.assertEqual(config.gitea_repos, ['owner/repo1', 'owner/repo2'])
         self.assertEqual(config.polling_frequency, 1)
         self.assertEqual(config.issue_label_reserve, 'agent-working')
-        self.assertEqual(config.issue_label_acceptance, 'agent-acceptance')
         # Should not raise exception
         config.validate()
 
@@ -108,7 +106,7 @@ class TestIntegration(unittest.TestCase):
         # Simulate the issue processing logic from main
         issue = issues[0]
         labels = [label['name'] for label in issue.get('labels', [])]
-        if config.issue_label_reserve not in labels and config.issue_label_acceptance not in labels:
+        if config.issue_label_reserve not in labels:
             # Reserve the issue
             new_labels = labels + [config.issue_label_reserve]
             client.update_issue_labels(owner, repo_name, issue['number'], new_labels)
