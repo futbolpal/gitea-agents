@@ -117,10 +117,11 @@ def main():
     repo_temp_dir = tempfile.mkdtemp()
     logger.info(f"Cloning repo {owner}/{repo_name} to {repo_temp_dir}")
     try:
-        # Construct clone URL with token
+        # Construct clone URL with token, preserving protocol
         base_url = config.gitea_base_url.rstrip('/api/v1')
+        protocol = 'https' if base_url.startswith('https://') else 'http'
         host = base_url.replace('https://', '').replace('http://', '')
-        clone_url = f"https://oauth2:{config.gitea_token}@{host}/{owner}/{repo_name}.git"
+        clone_url = f"{protocol}://oauth2:{config.gitea_token}@{host}/{owner}/{repo_name}.git"
         subprocess.run(["git", "clone", clone_url, repo_temp_dir], check=True)
         logger.info("Repository cloned successfully")
     except subprocess.CalledProcessError as e:
