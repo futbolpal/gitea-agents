@@ -67,14 +67,22 @@ Set the following environment variables:
 
 ### Using Docker (Recommended)
 
-1. Build the image:
+1. Build and push the image:
    ```bash
-   docker build -t kilocode-agent .
+   pip install -e .
+   build-image
+   ```
+
+   Or manually:
+   ```bash
+   podman build -t kilo-agent:latest .
+   podman tag kilo-agent:latest homenas.tail38254.ts.net:5001/kilo-agent:latest
+   podman push homenas.tail38254.ts.net:5001/kilo-agent:latest
    ```
 
 2. Run the container:
    ```bash
-   docker run -e GITEA_BASE_URL=... -e GITEA_TOKEN=... -e GITEA_REPOS=... kilocode-agent
+   podman run -e GITEA_BASE_URL=... -e GITEA_TOKEN=... -e GITEA_REPOS=... homenas.tail38254.ts.net:5001/kilo-agent:latest
    ```
 
 ### Local Development
