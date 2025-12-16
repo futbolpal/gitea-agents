@@ -29,13 +29,13 @@ def analyze_and_respond(comment_body):
 def kilocode_process(prompt, repo_dir):
     """Spawn subprocess to run kilo-code for code generation."""
     logger = logging.getLogger(__name__)
-    cmd = ["kilo-code", "-a", prompt]
+    cmd = ["kilocode", "-a", prompt]
     logger.info(f"Running kilo-code with prompt: {prompt[:50]}...")
     result = subprocess.run(cmd, cwd=repo_dir, capture_output=True, text=True)
     if result.returncode != 0:
-        logger.error(f"kilo-code failed: {result.stderr}")
+        logger.error(f"kilocode failed: {result.stderr}")
     else:
-        logger.info("kilo-code completed successfully")
+        logger.info("kilocode completed successfully")
     return result.returncode, result.stdout, result.stderr
 
 def do_work(issue_body, repo_dir):
