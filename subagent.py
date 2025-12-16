@@ -139,11 +139,15 @@ def main():
     # The kilo-code agent will handle branch creation, commits, and pushing
     head_branch = f"fix-issue-{issue_number}"
     try:
+        # Get the default branch for the repository
+        repo_info = client.get_repo(owner, repo_name)
+        default_branch = repo_info.get('default_branch', 'main')
+        logger.info(f"Using default branch: {default_branch}")
         pr = client.create_pull_request(
             owner, repo_name,
             f"Fix issue #{issue_number}: {issue['title']}",
             head_branch,
-            "main",  # Assume main branch
+            default_branch,
             f"Closes #{issue_number}\n\n{issue['body']}"
         )
         pr_number = pr['number']
