@@ -139,20 +139,25 @@ def main():
     # Handle branch creation, commits, and pushing since kilo-code may not do it
     head_branch = f"fix-issue-{issue_number}"
     try:
+        logger.debug(f"Creating branch {head_branch}")
         # Create and checkout branch
         subprocess.run(['git', 'checkout', '-b', head_branch], cwd=repo_temp_dir, check=True)
         logger.info(f"Created and checked out branch {head_branch}")
 
+        logger.debug("Adding changes to git")
         # Add all changes
         subprocess.run(['git', 'add', '.'], cwd=repo_temp_dir, check=True)
 
         # Check if there are staged changes
         result = subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=repo_temp_dir)
+        logger.debug(f"Git diff result: {result.returncode}")
         if result.returncode != 0:  # There are changes
+            logger.debug("Committing changes")
             # Commit
             subprocess.run(['git', 'commit', '-m', f'Fix issue #{issue_number}: {issue["title"]}'], cwd=repo_temp_dir, check=True)
             logger.info(f"Committed changes for issue {issue_number}")
 
+            logger.debug(f"Pushing branch {head_branch}")
             # Push
             subprocess.run(['git', 'push', 'origin', head_branch], cwd=repo_temp_dir, check=True)
             logger.info(f"Pushed branch {head_branch} to remote")
@@ -165,6 +170,7 @@ def main():
         shutil.rmtree(repo_temp_dir)
         sys.exit(1)
     try:
+        logger.debug(f"Creating PR with head={head_branch}")
         # Get the default branch for the repository
         repo_info = client.get_repo(owner, repo_name)
         default_branch = repo_info.get('default_branch', 'main')
