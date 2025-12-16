@@ -37,8 +37,7 @@ def main():
 
     # Ensure required labels exist in all repositories
     required_labels = [
-        {"name": config.issue_label_reserve, "color": "ffa500", "description": "Issue being worked on by agent"},
-        {"name": config.issue_label_acceptance, "color": "008000", "description": "Work completed and ready for review"}
+        {"name": config.issue_label_reserve, "color": "ffa500", "description": "Issue being worked on by agent"}
     ]
     for repo in config.gitea_repos:
         owner, repo_name = repo.split('/', 1)
@@ -93,7 +92,7 @@ def main():
                 logger.info(f"Found {len(issues)} open issues in {repo}")
                 for issue in issues:
                     labels = [label['name'] for label in issue.get('labels', [])]
-                    if config.issue_label_reserve not in labels and config.issue_label_acceptance not in labels:
+                    if config.issue_label_reserve not in labels:
                         logger.info(f"Reserving issue {issue['number']} in {repo}")
                         try:
                             # Reserve the issue
@@ -108,32 +107,6 @@ def main():
             except Exception as e:
                 logger.error(f"Error processing repo {repo}: {e}")
 
-        # Check for merged PRs and tag issues
-        for repo in config.gitea_repos:
-            owner, repo_name = repo.split('/', 1)
-            try:
-                logger.debug(f"Checking merged PRs for {repo}")
-                pulls = client.get_pulls(owner, repo_name, state='closed')
-                for pr in pulls:
-                    if pr.get('merged'):
-                        logger.info(f"Detected merged PR #{pr['number']} in {repo}")
-                        # Extract issue number from PR title/body (simple regex for #123)
-                        import re
-                        issue_match = re.search(r'#(\d+)', pr.get('title', '') + ' ' + pr.get('body', ''))
-                        if issue_match:
-                            issue_number = int(issue_match.group(1))
-                            try:
-                                # Tag the issue with acceptance
-                                issue = client.get_issue(owner, repo_name, issue_number)
-                                labels = [label['name'] for label in issue.get('labels', [])]
-                                if config.issue_label_acceptance not in labels:
-                                    new_labels = labels + [config.issue_label_acceptance]
-                                    client.update_issue_labels(owner, repo_name, issue_number, new_labels)
-                                    logger.info(f"Tagged issue #{issue_number} with acceptance label")
-                            except Exception as e:
-                                logger.error(f"Error tagging issue #{issue_number} for merged PR #{pr['number']}: {e}")
-            except Exception as e:
-                logger.error(f"Error checking PRs for repo {repo}: {e}")
 
         # Clean up finished subprocesses
         active_subprocesses[:] = [proc for proc in active_subprocesses if proc.poll() is None]
