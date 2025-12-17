@@ -94,7 +94,7 @@ class GiteaClient:
 
     def get_pull_comments(self, owner, repo, pull_number):
         """Get comments on a pull request."""
-        url = f'{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}/comments'
+        url = f'{self.base_url}/repos/{owner}/{repo}/issues/{pull_number}/comments'
         logger.debug(f"Getting comments for PR #{pull_number} in {owner}/{repo}")
         return self._make_request('GET', url)
 
@@ -106,7 +106,7 @@ class GiteaClient:
 
     def create_pull_comment(self, owner, repo, pull_number, body):
         """Create a comment on a pull request."""
-        url = f'{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}/comments'
+        url = f'{self.base_url}/repos/{owner}/{repo}/issues/{pull_number}/comments'
         data = {'body': body}
         logger.info(f"Creating comment on PR #{pull_number} in {owner}/{repo}")
         return self._make_request('POST', url, json=data)
