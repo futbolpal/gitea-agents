@@ -10,21 +10,7 @@ import tempfile
 import shutil
 from config import Config
 from gitea_client import GiteaClient
-
-def analyze_and_respond(comment_body):
-    """Analyze comment and generate response."""
-    logger = logging.getLogger(__name__)
-    body_lower = comment_body.lower()
-    if 'approve' in body_lower or 'approved' in body_lower:
-        logger.info("Detected approval in comment")
-        return "Thank you for the approval! The changes have been implemented as requested."
-    elif 'change' in body_lower or 'fix' in body_lower or 'modify' in body_lower:
-        # Simulate making code changes
-        logger.info("Simulating code changes based on feedback...")
-        return "Understood. I've made the necessary code changes based on your feedback. Please review the updated PR."
-    else:
-        logger.debug("General feedback comment detected")
-        return "Thanks for the feedback! I'll take that into consideration."
+from utils import analyze_and_respond
 
 def kilocode_process(prompt, repo_dir):
     """Spawn subprocess to run kilo-code for code generation."""
@@ -196,72 +182,7 @@ def main():
         logger.error(f"Failed to create PR for issue {issue_number}: {e}")
         sys.exit(1)
 
-    # Load conversation history
-    history_file = f"conversation_{issue_number}_{pr_number}.json"
-    try:
-        if os.path.exists(history_file):
-            with open(history_file, 'r') as f:
-                conversation_history = json.load(f)
-            logger.info(f"Loaded conversation history from {history_file}")
-        else:
-            conversation_history = []
-            logger.info("Starting new conversation history")
-    except (json.JSONDecodeError, IOError) as e:
-        logger.warning(f"Failed to load conversation history: {e}, starting fresh")
-        conversation_history = []
-
-    # Get last processed comment ID
-    last_comment_id = max([c['id'] for c in conversation_history] + [0])
-    logger.info(f"Last processed comment ID: {last_comment_id}")
-
-    # Poll for comments on PR
-    logger.info(f"Starting PR comment polling for PR #{pr_number}")
-    while running:
-        try:
-            # Check PR status
-            pr_details = client.get_pull_request(owner, repo_name, pr_number)
-            if pr_details['state'] == 'closed' or pr_details.get('merged', False):
-                logger.info(f"PR #{pr_number} is merged or closed. Terminating subagent.")
-                break
-
-            comments = client.get_pull_comments(owner, repo_name, pr_number)
-            new_comments = [c for c in comments if c['id'] > last_comment_id]
-            if new_comments:
-                logger.info(f"Found {len(new_comments)} new comments on PR #{pr_number}")
-
-            for comment in new_comments:
-                logger.info(f"Processing new comment {comment['id']} on PR #{pr_number}")
-                # Analyze and respond
-                response = analyze_and_respond(comment['body'])
-                if response:
-                    try:
-                        client.create_pull_comment(owner, repo_name, pr_number, response)
-                        logger.info(f"Responded to comment {comment['id']}: {response[:50]}...")
-                    except Exception as e:
-                        logger.error(f"Failed to create comment response: {e}")
-                        response = None  # Don't add to history if failed
-                # Add to history
-                conversation_history.append({
-                    'id': comment['id'],
-                    'body': comment['body'],
-                    'response': response
-                })
-                last_comment_id = comment['id']
-
-                # Save history periodically
-                try:
-                    with open(history_file, 'w') as f:
-                        json.dump(conversation_history, f, indent=2)
-                    logger.debug("Conversation history saved")
-                except IOError as e:
-                    logger.error(f"Failed to save conversation history: {e}")
-
-        except Exception as e:
-            logger.error(f"Error polling PR comments: {e}")
-
-        time.sleep(config.polling_frequency)
-
-    logger.info("Subagent polling loop ended")
+    logger.info(f"Subagent completed work for issue {issue_number}, PR #{pr_number} created")
 
 if __name__ == '__main__':
     main()

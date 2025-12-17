@@ -139,3 +139,15 @@ class GiteaClient:
         url = f'{self.base_url}/repos/{owner}/{repo}/labels'
         logger.debug(f"Getting labels for {owner}/{repo}")
         return self._make_request('GET', url)
+
+    def get_pull_reviews(self, owner, repo, pull_number):
+        """Get reviews for a pull request."""
+        url = f'{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}/reviews'
+        logger.debug(f"Getting reviews for PR #{pull_number} in {owner}/{repo}")
+        return self._make_request('GET', url)
+
+    def get_pull_review_comments(self, owner, repo, pull_number, review_id):
+        """Get comments for a specific review."""
+        url = f'{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments'
+        logger.debug(f"Getting comments for review {review_id} on PR #{pull_number} in {owner}/{repo}")
+        return self._make_request('GET', url)
