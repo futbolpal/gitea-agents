@@ -44,8 +44,9 @@ def do_work(issue_body, repo_dir):
     logger.info("Starting work on issue...")
     # Add instructions for commit and test management
     enhanced_prompt = (
-        "Do not create any new issues or pull requests. Only make code changes as requested.\n"
-        "Create small, focused commits for each logical change. Run all tests and ensure they pass before pushing the branch to the remote repository and finalizing the PR. Make multiple commits if needed for the PR.\n\n"
+        "Make code changes as requested.\n"
+        "Create small, focused commits for each logical change. Run all tests and ensure they pass before pushing the branch to the remote repository and finalizing the PR. Make multiple commits if needed for the PR.\n"
+        "Once all the work is done, create a PR\n\n" 
         + issue_body
     )
     ret, out, err = kilocode_process(enhanced_prompt, repo_dir)
@@ -142,58 +143,6 @@ def main():
     except Exception as e:
         logger.error(f"Work failed: {e}")
         shutil.rmtree(repo_temp_dir)
-        sys.exit(1)
-
-    # Handle branch creation, commits, and pushing since kilo-code may not do it
-    head_branch = f"fix-issue-{issue_number}"
-    try:
-        logger.debug(f"Creating branch {head_branch}")
-        # Create and checkout branch
-        subprocess.run(['git', 'checkout', '-b', head_branch], cwd=repo_temp_dir, check=True)
-        logger.info(f"Created and checked out branch {head_branch}")
-
-        logger.debug("Adding changes to git")
-        # Add all changes
-        subprocess.run(['git', 'add', '.'], cwd=repo_temp_dir, check=True)
-
-        # Check if there are staged changes
-        result = subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=repo_temp_dir)
-        logger.debug(f"Git diff result: {result.returncode}")
-        if result.returncode != 0:  # There are changes
-            logger.debug("Committing changes")
-            # Commit
-            subprocess.run(['git', 'commit', '-m', f'Fix issue #{issue_number}: {issue["title"]}'], cwd=repo_temp_dir, check=True)
-            logger.info(f"Committed changes for issue {issue_number}")
-
-            logger.debug(f"Pushing branch {head_branch}")
-            # Push
-            subprocess.run(['git', 'push', 'origin', head_branch], cwd=repo_temp_dir, check=True)
-            logger.info(f"Pushed branch {head_branch} to remote")
-        else:
-            logger.warning("No changes to commit")
-            # Still create PR if branch exists, but since no push, branch won't exist
-            # For now, assume changes are made
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Git operation failed: {e}")
-        shutil.rmtree(repo_temp_dir)
-        sys.exit(1)
-    try:
-        logger.debug(f"Creating PR with head={head_branch}")
-        # Get the default branch for the repository
-        repo_info = client.get_repo(owner, repo_name)
-        default_branch = repo_info.get('default_branch', 'main')
-        logger.info(f"Using default branch: {default_branch}")
-        pr = client.create_pull_request(
-            owner, repo_name,
-            f"Fix issue #{issue_number}: {issue['title']}",
-            head_branch,
-            default_branch,
-            f"Closes #{issue_number}\n\n{issue['body']}"
-        )
-        pr_number = pr['number']
-        logger.info(f"Created PR #{pr_number} for issue {issue_number}")
-    except Exception as e:
-        logger.error(f"Failed to create PR for issue {issue_number}: {e}")
         sys.exit(1)
 
     # Load conversation history
