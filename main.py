@@ -193,22 +193,32 @@ def main():
 
                 for comment in new_comments:
                     logger.info(f"Processing new comment/review {comment['id']} on PR #{pr_number}")
-                    # Analyze and respond
-                    response = analyze_and_respond(comment['body'])
-                    if response:
-                        try:
-                            client.create_pull_comment(owner, repo_name, pr_number, response)
-                            logger.info(f"Responded to comment {comment['id']}: {response[:50]}...")
-                        except Exception as e:
-                            logger.error(f"Failed to create comment response: {e}")
-                            response = None  # Don't add to history if failed
-                    # Add to history
-                    conversation_history.append({
-                        'id': comment['id'],
-                        'body': comment['body'],
-                        'response': response,
-                        'type': comment.get('type', 'comment')
-                    })
+                    # Check if already processed (has 'eyes' reaction)
+                    try:
+                        reactions = client.get_comment_reactions(owner, repo_name, comment['id'])
+                        has_eyes = any(r.get('content') == 'eyes' for r in reactions)
+                        if has_eyes:
+                            logger.debug(f"Comment {comment['id']} already processed (has eyes reaction)")
+                            last_comment_id = max(last_comment_id, comment['id'])
+                            continue
+                    except Exception as e:
+                        logger.warning(f"Could not check reactions for comment {comment['id']}: {e}")
+
+                    # Add 'eyes' reaction
+                    try:
+                        client.add_comment_reaction(owner, repo_name, comment['id'], 'eyes')
+                        logger.debug(f"Added eyes reaction to comment {comment['id']}")
+                    except Exception as e:
+                        logger.warning(f"Could not add eyes reaction to comment {comment['id']}: {e}")
+
+                    # Spawn subagent for this comment
+                    try:
+                        proc = subprocess.Popen(['python', 'subagent.py', '--comment', str(comment['id']), repo])
+                        active_subprocesses.append(proc)
+                        logger.info(f"Spawned subagent for comment {comment['id']} on PR #{pr_number} (PID: {proc.pid})")
+                    except Exception as e:
+                        logger.error(f"Failed to spawn subagent for comment {comment['id']}: {e}")
+
                     last_comment_id = max(last_comment_id, comment['id'])
 
                 pr_data['last_comment_id'] = last_comment_id

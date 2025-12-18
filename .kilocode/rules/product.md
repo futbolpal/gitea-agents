@@ -4,11 +4,14 @@ An experience that allows agents to automatically code solutions to Gitea Issues
 
 ## Definitions
 
-- **Agent**: The main application that polls for issues and manages subagents.
-- **Subagent**: A subprocess spawned by the agent to handle work on a specific issue, including PR creation and feedback monitoring.
+- **Orchestration**: The main application that polls for issues and manages subagents.
+- **Subagent**: A subprocess spawned by the agent to handle work on a specific issue or comment.
 - Owner: The human building the product
 
 ## Goal
+
+Orchestration polls for new, unlabeled issues to initiate work.
+Orchestration polls for pull comments and review comments to initiate work.
 
 The agent polls for new or unlabeled repo issues to initiate work.
 For each qualifying issue, the agent:
@@ -17,58 +20,73 @@ For each qualifying issue, the agent:
 - spawns a subagent to complete the task.
 
 When the subagent completes its work, it creates a pull request (PR).
-The subagent then begins polling for comments on the PR.
 
-Subagents monitor PR comments and respond to feedback (e.g., by making code changes or requesting clarification).
-Subagents persist their state (e.g., task progress, conversation history) using a combination of Issue ID and PR ID.
+Orchestration monitors PRs for new comments and reviews, spawning subagents to handle feedback.
 
 ## Orchestration Workflow
 
 ### Overview
-The orchestration layer (main agent) manages the overall process of monitoring repositories, spawning subagents for issues, and coordinating their lifecycle.
+
+The orchestration layer manages the overall process of monitoring repositories, spawning subagents for coding tasks, and coordinating their lifecycle.
 
 ### Workflow Steps
 
 #### 1. Initialization
+
 - Load configuration from environment variables or config file.
 - Validate Gitea API connection using GITEA_BASE_URL.
 - Initialize logging and state storage.
 
 #### 2. Polling Loop
+
 - Run continuously with interval POLLING_FREQUENCY seconds.
 - For each repository in GITEA_REPOS:
   - Query Gitea API for issues (open, unlabeled, not already reserved).
+  - For active PRs, query for comments and review comments.
   - Filter qualifying issues (e.g., exclude those with certain labels).
+  - Filter comments that already have an 'eyes' reaction.
 
-#### 3. Issue Processing
+#### 3. Work Processing
+
 - For each qualifying issue:
   - Apply ISSUE_LABEL_RESERVE to reserve it.
-  - Spawn a subagent subprocess, passing Issue ID and config.
+  - Spawn a subagent subprocess, passing Issue ID and context.
+  - Log the subagent creation.
+- For each qualifying comment (PR or review):
+  - Add the 'eyes' reaction.
+  - Spawn a subagent subprocess, passing Comment ID and context.
   - Log the subagent creation.
 
 #### 4. Subagent Management
-- Subagents run independently; orchestration layer does not directly manage their internal state.
-- Periodically check for completed subagents (e.g., via process status or shared state).
+
+- Subagents run independently; orchestration layer spawns them for issues and comments.
+- Periodically check for completed subagents (e.g., via process status).
 
 #### 5. PR Merge Handling
+
 - Poll for merged PRs associated with issues.
 - When a PR is merged, the associated issue is automatically closed (if PR contains 'Closes #issue').
 - Clean up any subagent resources if applicable.
 
 #### 6. Error Handling
+
 - Handle API failures (e.g., retry with backoff).
 - Log errors and notify owner if critical.
 - Restart failed subagents if configured.
 
 #### 7. Shutdown
+
 - Gracefully terminate polling on signal.
 - Wait for active subagents to complete or force kill after timeout.
 
 ### Sequence Diagram (Text-based)
+
 ```
 Agent Start -> Load Config -> Validate API
-Loop: Poll Issues -> Filter Qualifying -> Reserve Issue -> Spawn Subagent
-Subagent: Work -> Create PR -> Poll Comments -> Respond
+Loop: Poll Issues -> Filter Qualifying -> Reserve -> Spawn Subagent
+Subagent: Work -> Create PR -> Exit
+Loop: Poll PR Comments/Reviews -> Filter Qualifying -> Add Eyes -> Spawn Subagent
+Subagent: Analyze Comment -> Respond -> Exit
 PR Merged -> Issue Closed -> Cleanup
 ```
 

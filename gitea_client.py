@@ -151,3 +151,16 @@ class GiteaClient:
         url = f'{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments'
         logger.debug(f"Getting comments for review {review_id} on PR #{pull_number} in {owner}/{repo}")
         return self._make_request('GET', url)
+
+    def add_comment_reaction(self, owner, repo, comment_id, reaction):
+        """Add a reaction to a comment."""
+        url = f'{self.base_url}/repos/{owner}/{repo}/issues/comments/{comment_id}/reactions'
+        data = {'content': reaction}
+        logger.debug(f"Adding {reaction} reaction to comment {comment_id} in {owner}/{repo}")
+        return self._make_request('POST', url, json=data)
+
+    def get_comment_reactions(self, owner, repo, comment_id):
+        """Get reactions for a comment."""
+        url = f'{self.base_url}/repos/{owner}/{repo}/issues/comments/{comment_id}/reactions'
+        logger.debug(f"Getting reactions for comment {comment_id} in {owner}/{repo}")
+        return self._make_request('GET', url)

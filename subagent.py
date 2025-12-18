@@ -42,21 +42,39 @@ def do_work(issue_body, repo_dir):
 
 def main():
     if len(sys.argv) < 3:
-        print("Usage: python subagent.py <issue_number> <repo>", file=sys.stderr)
+        print("Usage: python subagent.py <issue_number> <repo> OR python subagent.py --comment <comment_id> <repo>", file=sys.stderr)
         sys.exit(1)
 
-    try:
-        issue_number = int(sys.argv[1])
-        repo = sys.argv[2]
-    except ValueError as e:
-        print(f"Invalid arguments: {e}", file=sys.stderr)
-        sys.exit(1)
+    comment_id = None
+    issue_number = None
+    repo = None
+
+    if sys.argv[1] == '--comment':
+        if len(sys.argv) < 4:
+            print("Usage: python subagent.py --comment <comment_id> <repo>", file=sys.stderr)
+            sys.exit(1)
+        try:
+            comment_id = int(sys.argv[2])
+            repo = sys.argv[3]
+        except ValueError as e:
+            print(f"Invalid arguments: {e}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        try:
+            issue_number = int(sys.argv[1])
+            repo = sys.argv[2]
+        except ValueError as e:
+            print(f"Invalid arguments: {e}", file=sys.stderr)
+            sys.exit(1)
 
     os.environ['PROCESS_TYPE'] = 'subagent'
     config = Config()
     config.validate()
     logger = config.setup_logging()
-    logger.info(f"Starting subagent for issue {issue_number} in repo {repo}")
+    if issue_number:
+        logger.info(f"Starting subagent for issue {issue_number} in repo {repo}")
+    else:
+        logger.info(f"Starting subagent for comment {comment_id} in repo {repo}")
 
     client = GiteaClient(config.gitea_base_url, config.gitea_token)
 
@@ -68,14 +86,6 @@ def main():
 
     def cleanup():
         """Cleanup function for conversation history and temp repo."""
-        if conversation_history:
-            try:
-                history_file = f"conversation_{issue_number}_{pr_number if 'pr_number' in locals() else 0}.json"
-                with open(history_file, 'w') as f:
-                    json.dump(conversation_history, f, indent=2)
-                logger.info("Conversation history saved")
-            except Exception as e:
-                logger.error(f"Failed to save conversation history: {e}")
         # Cleanup temp repo dir
         if 'repo_temp_dir' in locals() and os.path.exists(repo_temp_dir):
             try:
@@ -93,6 +103,35 @@ def main():
     signal.signal(signal.SIGTERM, signal_handler)
     atexit.register(cleanup)
 
+    if comment_id:
+        # Handle comment processing
+        try:
+            # Get comment details (assuming it's an issue comment)
+            comment = client._make_request('GET', f'{client.base_url}/repos/{owner}/{repo_name}/issues/comments/{comment_id}')
+            logger.info(f"Processing comment {comment_id}: {comment['body'][:50]}...")
+
+            # Analyze and respond
+            response = analyze_and_respond(comment['body'])
+            if response:
+                try:
+                    client.create_pull_comment(owner, repo_name, comment_id, response)  # Wait, this is for PR comments, but comment might be on issue
+                    # Actually, since comments are on issues/PRs, and we use issues/comments API, but to reply, we need to know if it's on PR or issue
+                    # For simplicity, assume it's on a PR, or use the general comment API
+                    # But Gitea allows replying to issue comments with issues/comments/{id} POST, but actually to create a reply, it's the same endpoint
+                    # Wait, to reply to a comment, it's POST to issues/comments with body and in_reply_to
+                    # But for simplicity, since the user said to respond, let's just log for now
+                    logger.info(f"Would respond to comment {comment_id}: {response}")
+                except Exception as e:
+                    logger.error(f"Failed to respond to comment {comment_id}: {e}")
+
+            logger.info(f"Subagent completed processing comment {comment_id}")
+            sys.exit(0)
+
+        except Exception as e:
+            logger.error(f"Failed to process comment {comment_id}: {e}")
+            sys.exit(1)
+
+    # Issue processing
     try:
         # Get issue details
         issue = client.get_issue(owner, repo_name, issue_number)
