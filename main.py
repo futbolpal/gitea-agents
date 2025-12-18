@@ -80,7 +80,7 @@ def main():
     running = True
     active_subprocesses = {}  # pid -> {'proc': Popen, 'work_item': str, 'id': int, 'repo': str}
     pr_comment_state = {}  # (repo, pr_number) -> {'last_comment_id': int}
-    state_file = 'orchestration_state.json'
+    state_file = '/data/orchestration_state.json'
 
     # Load persisted state
     try:
@@ -241,8 +241,11 @@ def main():
                         # Check reactions
                         try:
                             reactions = client.get_comment_reactions(owner, repo_name, comment['id'])
-                            has_eyes = any(r.get('content') == 'eyes' for r in reactions)
-                            has_heart = any(r.get('content') == 'heart' for r in reactions)
+                            if reactions:
+                                has_eyes = any(r.get('content') == 'eyes' for r in reactions)
+                                has_heart = any(r.get('content') == 'heart' for r in reactions)
+                            else:
+                                has_eyes = has_heart = False
                         except Exception as e:
                             logger.warning(f"Could not check reactions for comment {comment['id']}: {e}")
                             has_eyes = has_heart = False

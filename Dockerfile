@@ -5,8 +5,8 @@ WORKDIR /app
 # Create non-root user and set up directories
 RUN groupadd -r kilocode && \
     useradd -r -g kilocode kilocode && \
-    mkdir -p /home/kilocode/.kilocode /workspace && \
-    chown -R kilocode:kilocode /home/kilocode /workspace
+    mkdir -p /home/kilocode/.kilocode /workspace /data && \
+    chown -R kilocode:kilocode /home/kilocode /workspace /data
 
 
 # Install kilocode CLI and git
