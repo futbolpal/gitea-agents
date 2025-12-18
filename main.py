@@ -9,7 +9,7 @@ import psutil
 from config import Config
 from gitea_client import GiteaClient
 
-def is_issue_completed(client, owner, repo_name, issue_number, config):
+def is_issue_completed(client, owner, repo_name, issue_number, config, logger):
     """Check if an issue is completed (has the in-review label)."""
     try:
         issue = client.get_issue(owner, repo_name, issue_number)
@@ -19,7 +19,7 @@ def is_issue_completed(client, owner, repo_name, issue_number, config):
         logger.warning(f"Could not check if issue {issue_number} is completed: {e}")
         return False
 
-def is_comment_completed(client, owner, repo_name, comment_id):
+def is_comment_completed(client, owner, repo_name, comment_id, logger):
     """Check if a comment is completed (has 'heart' reaction)."""
     try:
         reactions = client.get_comment_reactions(owner, repo_name, comment_id)
@@ -91,9 +91,12 @@ def main():
                 pid = int(pid_str)
                 if psutil.pid_exists(pid):
                     # Keep the info but can't restore Popen
-                    active_subprocesses[pid] = info
+                    active_subprocesses[pid] = info.copy()
                     active_subprocesses[pid]['proc'] = None
-            pr_comment_state.update(persisted_state.get('pr_comment_state', {}))
+            # Convert string keys back to tuples for pr_comment_state
+            for key_str, value in persisted_state.get('pr_comment_state', {}).items():
+                repo, pr_number = key_str.split('|', 1)
+                pr_comment_state[(repo, int(pr_number))] = value
             logger.info(f"Loaded persisted state: {len(active_subprocesses)} active subprocesses")
     except Exception as e:
         logger.warning(f"Could not load persisted state: {e}")
@@ -108,10 +111,16 @@ def main():
                     str(pid): {
                         'work_item': info['work_item'],
                         'id': info['id'],
-                        'repo': info['repo']
+                        'repo': info['repo'],
+                        'pr_number': info.get('pr_number'),
+                        'review_id': info.get('review_id'),
+                        'retry_count': info.get('retry_count', 0)
                     } for pid, info in active_subprocesses.items()
                 },
-                'pr_comment_state': pr_comment_state
+                'pr_comment_state': {
+                    f"{repo}|{pr_number}": value
+                    for (repo, pr_number), value in pr_comment_state.items()
+                }
             }
             with open(state_file, 'w') as f:
                 json.dump(state, f, indent=2)
@@ -159,7 +168,7 @@ def main():
                     active_issue_pids = [pid for pid, info in active_subprocesses.items()
                                        if info['work_item'] == 'issue' and info['id'] == issue['number']]
                     has_proc_worker = len(active_issue_pids) > 0
-                    completed = is_issue_completed(client, owner, repo_name, issue['number'], config)
+                    completed = is_issue_completed(client, owner, repo_name, issue['number'], config, logger)
 
                     should_spawn = not reserved or (reserved and not has_proc_worker and not completed)
 
@@ -249,7 +258,7 @@ def main():
                         active_comment_pids = [pid for pid, info in active_subprocesses.items()
                                               if info['work_item'] != 'issue' and info['id'] == comment['id']]
                         has_proc_worker = len(active_comment_pids) > 0
-                        completed = is_comment_completed(client, owner, repo_name, comment['id'])
+                        completed = is_comment_completed(client, owner, repo_name, comment['id'], logger)
 
                         should_spawn = not reserved or (reserved and not has_proc_worker and not completed)
 
