@@ -152,6 +152,14 @@ class GiteaClient:
         logger.debug(f"Getting comments for review {review_id} on PR #{pull_number} in {owner}/{repo}")
         return self._make_request('GET', url)
 
+    def get_pull_review_comment(self, owner, repo, pull_number, review_id, comment_id):
+        """Get a specific review comment by ID."""
+        comments = self.get_pull_review_comments(owner, repo, pull_number, review_id)
+        for comment in comments:
+            if comment['id'] == comment_id:
+                return comment
+        raise Exception(f"Review comment {comment_id} not found in review {review_id}")
+
     def add_comment_reaction(self, owner, repo, comment_id, reaction):
         """Add a reaction to a comment."""
         url = f'{self.base_url}/repos/{owner}/{repo}/issues/comments/{comment_id}/reactions'

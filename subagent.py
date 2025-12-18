@@ -127,7 +127,7 @@ def main():
                 body = comment['body']
                 context = ""
             elif comment_type == 'review_comment':
-                comment = client._make_request('GET', f'{client.base_url}/repos/{owner}/{repo_name}/pulls/{pr_number}/reviews/{review_id}/comments/{comment_id}')
+                comment = client.get_pull_review_comment(owner, repo_name, pr_number, review_id, comment_id)
                 body = comment['body']
                 context = f" on {comment['path']} at line {comment['line']}"
             else:
