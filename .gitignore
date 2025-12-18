@@ -1,3 +1,4 @@
 __pycache__/**/*
 kilocode_agent.log
+orchestration_state.json
 *.egg-info

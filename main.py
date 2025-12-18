@@ -5,6 +5,7 @@ import logging
 import os
 import atexit
 import json
+import psutil
 from config import Config
 from gitea_client import GiteaClient
 from utils import analyze_and_respond
@@ -59,6 +60,44 @@ def main():
     running = True
     active_subprocesses = {}  # pid -> {'proc': Popen, 'work_item': str, 'id': int, 'repo': str}
     pr_comment_state = {}  # (repo, pr_number) -> {'last_comment_id': int}
+    state_file = 'orchestration_state.json'
+
+    # Load persisted state
+    try:
+        if os.path.exists(state_file):
+            with open(state_file, 'r') as f:
+                persisted_state = json.load(f)
+            # Check which PIDs are still running
+            for pid_str, info in persisted_state.get('active_subprocesses', {}).items():
+                pid = int(pid_str)
+                if psutil.pid_exists(pid):
+                    # Keep the info but can't restore Popen
+                    active_subprocesses[pid] = info
+                    active_subprocesses[pid]['proc'] = None
+            pr_comment_state.update(persisted_state.get('pr_comment_state', {}))
+            logger.info(f"Loaded persisted state: {len(active_subprocesses)} active subprocesses")
+    except Exception as e:
+        logger.warning(f"Could not load persisted state: {e}")
+        active_subprocesses = {}
+        pr_comment_state = {}
+
+    def save_state():
+        """Persist current state to disk."""
+        try:
+            state = {
+                'active_subprocesses': {
+                    str(pid): {
+                        'work_item': info['work_item'],
+                        'id': info['id'],
+                        'repo': info['repo']
+                    } for pid, info in active_subprocesses.items()
+                },
+                'pr_comment_state': pr_comment_state
+            }
+            with open(state_file, 'w') as f:
+                json.dump(state, f, indent=2)
+        except Exception as e:
+            logger.error(f"Could not save state: {e}")
 
     def cleanup_subprocesses():
         """Cleanup active subprocesses on shutdown."""
@@ -251,6 +290,9 @@ def main():
         for pid in finished_pids:
             logger.info(f"Subprocess {pid} for {active_subprocesses[pid]['work_item']} {active_subprocesses[pid]['id']} finished")
             del active_subprocesses[pid]
+
+        # Save state periodically
+        save_state()
 
         logger.info(f"Polling cycle completed, sleeping for {config.polling_frequency} seconds")
         time.sleep(config.polling_frequency)
