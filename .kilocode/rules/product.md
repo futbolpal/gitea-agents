@@ -41,12 +41,13 @@ The orchestration layer manages the overall process of monitoring repositories, 
 
 - Run continuously with interval POLLING_FREQUENCY seconds.
 - For each repository in GITEA_REPOS:
-  - Query Gitea API for issues (open, unlabeled, not already reserved).
-  - Check for reserved issues/comments that have no active subprocess (work not done) and respawn.
+  - Query Gitea API for issues (open, unlabeled).
+  - For each issue, check spawning condition: !reserved || (reserved && !hasProcWorker && !completed)
+    - Issue is completed if a PR exists that closes it.
   - For active PRs, query for comments and review comments.
-  - Filter qualifying issues (e.g., exclude those with certain labels).
-  - Filter comments that already have a 'heart' reaction (addressed).
-  - For comments with 'eyes' reaction but no active subprocess, respawn.
+  - For each comment, check spawning condition: !reserved || (reserved && !hasProcWorker && !completed)
+    - Comment is reserved if it has 'eyes' reaction.
+    - Comment is completed if it has 'heart' reaction.
 
 #### 3. Work Processing
 
