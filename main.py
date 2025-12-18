@@ -58,7 +58,7 @@ def main():
 
     running = True
     active_subprocesses = []
-    active_prs = {}  # issue_number -> {'pr_number': int, 'last_comment_id': int, 'conversation_history': list}
+    pr_comment_state = {}  # (repo, pr_number) -> {'last_comment_id': int}
 
     def cleanup_subprocesses():
         """Cleanup active subprocesses on shutdown."""
@@ -104,7 +104,6 @@ def main():
                             # Spawn subagent
                             proc = subprocess.Popen(['python', 'subagent.py', str(issue['number']), repo])
                             active_subprocesses.append(proc)
-                            active_prs[str(issue['number'])] = {'repo': repo, 'pr_number': None, 'last_comment_id': 0, 'conversation_history': []}
                             logger.info(f"Spawned subagent for issue {issue['number']} in {repo} (PID: {proc.pid})")
                         except Exception as e:
                             logger.error(f"Failed to reserve or spawn subagent for issue {issue['number']}: {e}")
@@ -112,7 +111,7 @@ def main():
                 logger.error(f"Error processing repo {repo}: {e}")
 
 
-        # Query for active PRs and their comments
+        # Query for PR comments and reviews
         for repo in config.gitea_repos:
             owner, repo_name = repo.split('/', 1)
             try:
@@ -120,112 +119,74 @@ def main():
                 prs = client.get_pulls(owner, repo_name, state='open')
                 for pr in prs:
                     pr_number = pr['number']
-                    pr_body = pr.get('body', '')
-                    pr_title = pr.get('title', '')
+                    pr_key = (repo, pr_number)
 
-                    # Check if this PR closes an issue we're tracking
-                    import re
-                    issue_match = re.search(r'#(\d+)', pr_title + ' ' + pr_body)
-                    if issue_match:
-                        issue_number = str(issue_match.group(1))
-                        if issue_number in active_prs:
-                            # This is a PR for an issue we're tracking
-                            if active_prs[issue_number].get('pr_number') != pr_number:
-                                active_prs[issue_number]['pr_number'] = pr_number
-                                logger.info(f"Associated PR #{pr_number} with issue {issue_number}")
+                    # Initialize state for this PR if not seen before
+                    if pr_key not in pr_comment_state:
+                        pr_comment_state[pr_key] = {'last_comment_id': 0}
 
-                            # Poll comments for this PR
-                            pr_data = active_prs[issue_number]
+                    last_comment_id = pr_comment_state[pr_key]['last_comment_id']
 
-                            # Load conversation history
-                            history_file = f"conversation_{issue_number}_{pr_number}.json"
-                            conversation_history = pr_data['conversation_history']
-                            if not conversation_history:
-                                try:
-                                    if os.path.exists(history_file):
-                                        with open(history_file, 'r') as f:
-                                            conversation_history = json.load(f)
-                                        pr_data['conversation_history'] = conversation_history
-                                        logger.info(f"Loaded conversation history from {history_file}")
-                                    else:
-                                        conversation_history = []
-                                        pr_data['conversation_history'] = conversation_history
-                                        logger.info("Starting new conversation history")
-                                except (json.JSONDecodeError, IOError) as e:
-                                    logger.warning(f"Failed to load conversation history: {e}, starting fresh")
-                                    conversation_history = []
-                                    pr_data['conversation_history'] = conversation_history
+                    # Get PR comments
+                    comments = client.get_pull_comments(owner, repo_name, pr_number)
+                    new_comments = [c for c in comments if c['id'] > last_comment_id]
 
-                            last_comment_id = pr_data['last_comment_id']
+                    # Get reviews and their comments
+                    reviews = client.get_pull_reviews(owner, repo_name, pr_number)
+                    for review in reviews:
+                        if review.get('body'):
+                            # Treat review body as a comment
+                            review_comment = {
+                                'id': review['id'] + 1000000,  # Offset to avoid conflict with comment ids
+                                'body': review['body'],
+                                'user': review.get('user', {}),
+                                'created_at': review.get('submitted_at', review.get('created_at', '')),
+                                'type': 'review'
+                            }
+                            if review_comment['id'] > last_comment_id:
+                                new_comments.append(review_comment)
 
-                            # Get PR comments
-                            comments = client.get_pull_comments(owner, repo_name, pr_number)
-                            new_comments = [c for c in comments if c['id'] > last_comment_id]
+                        # Get review comments
+                        review_comments = client.get_pull_review_comments(owner, repo_name, pr_number, review['id'])
+                        for rc in review_comments:
+                            rc['type'] = 'review_comment'
+                            if rc['id'] > last_comment_id:
+                                new_comments.append(rc)
 
-                            # Get reviews and their comments
-                            reviews = client.get_pull_reviews(owner, repo_name, pr_number)
-                            for review in reviews:
-                                if review.get('body'):
-                                    # Treat review body as a comment
-                                    review_comment = {
-                                        'id': review['id'] + 1000000,  # Offset to avoid conflict with comment ids
-                                        'body': review['body'],
-                                        'user': review.get('user', {}),
-                                        'created_at': review.get('submitted_at', review.get('created_at', '')),
-                                        'type': 'review'
-                                    }
-                                    if review_comment['id'] > last_comment_id:
-                                        new_comments.append(review_comment)
+                    if new_comments:
+                        logger.info(f"Found {len(new_comments)} new comments/reviews on PR #{pr_number}")
 
-                                # Get review comments
-                                review_comments = client.get_pull_review_comments(owner, repo_name, pr_number, review['id'])
-                                for rc in review_comments:
-                                    rc['type'] = 'review_comment'
-                                    if rc['id'] > last_comment_id:
-                                        new_comments.append(rc)
-
-                            if new_comments:
-                                logger.info(f"Found {len(new_comments)} new comments/reviews on PR #{pr_number}")
-
-                            for comment in new_comments:
-                                logger.info(f"Processing new comment/review {comment['id']} on PR #{pr_number}")
-                                # Check if already processed (has 'eyes' reaction)
-                                try:
-                                    reactions = client.get_comment_reactions(owner, repo_name, comment['id'])
-                                    has_eyes = any(r.get('content') == 'eyes' for r in reactions)
-                                    if has_eyes:
-                                        logger.debug(f"Comment {comment['id']} already processed (has eyes reaction)")
-                                        last_comment_id = max(last_comment_id, comment['id'])
-                                        continue
-                                except Exception as e:
-                                    logger.warning(f"Could not check reactions for comment {comment['id']}: {e}")
-
-                                # Add 'eyes' reaction
-                                try:
-                                    client.add_comment_reaction(owner, repo_name, comment['id'], 'eyes')
-                                    logger.debug(f"Added eyes reaction to comment {comment['id']}")
-                                except Exception as e:
-                                    logger.warning(f"Could not add eyes reaction to comment {comment['id']}: {e}")
-
-                                # Spawn subagent for this comment
-                                try:
-                                    proc = subprocess.Popen(['python', 'subagent.py', '--comment', str(comment['id']), repo])
-                                    active_subprocesses.append(proc)
-                                    logger.info(f"Spawned subagent for comment {comment['id']} on PR #{pr_number} (PID: {proc.pid})")
-                                except Exception as e:
-                                    logger.error(f"Failed to spawn subagent for comment {comment['id']}: {e}")
-
+                    for comment in new_comments:
+                        logger.info(f"Processing new comment/review {comment['id']} on PR #{pr_number}")
+                        # Check if already processed (has 'eyes' reaction)
+                        try:
+                            reactions = client.get_comment_reactions(owner, repo_name, comment['id'])
+                            has_eyes = any(r.get('content') == 'eyes' for r in reactions)
+                            if has_eyes:
+                                logger.debug(f"Comment {comment['id']} already processed (has eyes reaction)")
                                 last_comment_id = max(last_comment_id, comment['id'])
+                                continue
+                        except Exception as e:
+                            logger.warning(f"Could not check reactions for comment {comment['id']}: {e}")
 
-                            pr_data['last_comment_id'] = last_comment_id
+                        # Add 'eyes' reaction
+                        try:
+                            client.add_comment_reaction(owner, repo_name, comment['id'], 'eyes')
+                            logger.debug(f"Added eyes reaction to comment {comment['id']}")
+                        except Exception as e:
+                            logger.warning(f"Could not add eyes reaction to comment {comment['id']}: {e}")
 
-                            # Save history periodically
-                            try:
-                                with open(history_file, 'w') as f:
-                                    json.dump(conversation_history, f, indent=2)
-                                logger.debug("Conversation history saved")
-                            except IOError as e:
-                                logger.error(f"Failed to save conversation history: {e}")
+                        # Spawn subagent for this comment
+                        try:
+                            proc = subprocess.Popen(['python', 'subagent.py', '--comment', str(comment['id']), repo])
+                            active_subprocesses.append(proc)
+                            logger.info(f"Spawned subagent for comment {comment['id']} on PR #{pr_number} (PID: {proc.pid})")
+                        except Exception as e:
+                            logger.error(f"Failed to spawn subagent for comment {comment['id']}: {e}")
+
+                        last_comment_id = max(last_comment_id, comment['id'])
+
+                    pr_comment_state[pr_key]['last_comment_id'] = last_comment_id
 
             except Exception as e:
                 logger.error(f"Error querying PRs for repo {repo}: {e}")
