@@ -10,18 +10,12 @@ from config import Config
 from gitea_client import GiteaClient
 from utils import analyze_and_respond
 
-def is_issue_completed(client, owner, repo_name, issue_number):
-    """Check if an issue is completed (has a PR that closes it)."""
+def is_issue_completed(client, owner, repo_name, issue_number, config):
+    """Check if an issue is completed (has the in-review label)."""
     try:
-        # Get open PRs and check if any closes this issue
-        prs = client.get_pulls(owner, repo_name, state='all')  # Get all to include merged
-        for pr in prs:
-            pr_body = pr.get('body', '')
-            pr_title = pr.get('title', '')
-            import re
-            if re.search(rf'#\b{issue_number}\b', pr_title + ' ' + pr_body):
-                return True
-        return False
+        issue = client.get_issue(owner, repo_name, issue_number)
+        labels = [label['name'] for label in issue.get('labels', [])]
+        return config.issue_label_in_review in labels
     except Exception as e:
         logger.warning(f"Could not check if issue {issue_number} is completed: {e}")
         return False
@@ -65,7 +59,8 @@ def main():
 
     # Ensure required labels exist in all repositories
     required_labels = [
-        {"name": config.issue_label_reserve, "color": "ffa500", "description": "Issue being worked on by agent"}
+        {"name": config.issue_label_reserve, "color": "ffa500", "description": "Issue being worked on by agent"},
+        {"name": config.issue_label_in_review, "color": "ffff00", "description": "Issue has PR created and is under review"}
     ]
     for repo in config.gitea_repos:
         owner, repo_name = repo.split('/', 1)
@@ -165,7 +160,7 @@ def main():
                     active_issue_pids = [pid for pid, info in active_subprocesses.items()
                                        if info['work_item'] == 'issue' and info['id'] == issue['number']]
                     has_proc_worker = len(active_issue_pids) > 0
-                    completed = is_issue_completed(client, owner, repo_name, issue['number'])
+                    completed = is_issue_completed(client, owner, repo_name, issue['number'], config)
 
                     should_spawn = not reserved or (reserved and not has_proc_worker and not completed)
 

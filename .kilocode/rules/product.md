@@ -43,7 +43,7 @@ The orchestration layer manages the overall process of monitoring repositories, 
 - For each repository in GITEA_REPOS:
   - Query Gitea API for issues (open, unlabeled).
   - For each issue, check spawning condition: !reserved || (reserved && !hasProcWorker && !completed)
-    - Issue is completed if a PR exists that closes it.
+    - Issue is completed if it has ISSUE_LABEL_IN_REVIEW label.
   - For active PRs, query for comments and review comments.
   - For each comment, check spawning condition: !reserved || (reserved && !hasProcWorker && !completed)
     - Comment is reserved if it has 'eyes' reaction.
@@ -102,3 +102,4 @@ PR Merged -> Issue Closed -> Cleanup
 - GITEA_REPOS - comma-delimited list of repositories to monitor (e.g., "owner/repo1,owner/repo2")
 - POLLING_FREQUENCY - frequency in seconds for checking issues and PR comments (default: 60)
 - ISSUE_LABEL_RESERVE - label applied to issues being worked on by a subagent (e.g., "agent-working")
+- ISSUE_LABEL_IN_REVIEW - label applied to issues that have PRs created and are under review (e.g., "agent-in-review")
