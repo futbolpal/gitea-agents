@@ -114,13 +114,14 @@ def main():
             response = analyze_and_respond(comment['body'])
             if response:
                 try:
-                    client.create_pull_comment(owner, repo_name, comment_id, response)  # Wait, this is for PR comments, but comment might be on issue
-                    # Actually, since comments are on issues/PRs, and we use issues/comments API, but to reply, we need to know if it's on PR or issue
-                    # For simplicity, assume it's on a PR, or use the general comment API
-                    # But Gitea allows replying to issue comments with issues/comments/{id} POST, but actually to create a reply, it's the same endpoint
-                    # Wait, to reply to a comment, it's POST to issues/comments with body and in_reply_to
-                    # But for simplicity, since the user said to respond, let's just log for now
-                    logger.info(f"Would respond to comment {comment_id}: {response}")
+                    # For now, assume it's a PR comment and respond
+                    # TODO: Determine if it's issue or PR comment and respond appropriately
+                    client.create_pull_comment(owner, repo_name, comment_id, response)
+                    logger.info(f"Responded to comment {comment_id}: {response[:50]}...")
+
+                    # Add 'heart' reaction to indicate addressed
+                    client.add_comment_reaction(owner, repo_name, comment_id, 'heart')
+                    logger.info(f"Added heart reaction to comment {comment_id}")
                 except Exception as e:
                     logger.error(f"Failed to respond to comment {comment_id}: {e}")
 

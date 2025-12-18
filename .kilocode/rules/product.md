@@ -42,9 +42,11 @@ The orchestration layer manages the overall process of monitoring repositories, 
 - Run continuously with interval POLLING_FREQUENCY seconds.
 - For each repository in GITEA_REPOS:
   - Query Gitea API for issues (open, unlabeled, not already reserved).
+  - Check for reserved issues/comments that have no active subprocess (work not done) and respawn.
   - For active PRs, query for comments and review comments.
   - Filter qualifying issues (e.g., exclude those with certain labels).
-  - Filter comments that already have an 'eyes' reaction.
+  - Filter comments that already have a 'heart' reaction (addressed).
+  - For comments with 'eyes' reaction but no active subprocess, respawn.
 
 #### 3. Work Processing
 
@@ -56,11 +58,14 @@ The orchestration layer manages the overall process of monitoring repositories, 
   - Add the 'eyes' reaction.
   - Spawn a subagent subprocess, passing Comment ID and context.
   - Log the subagent creation.
+- When a comment is addressed, add a 'heart' reaction.
 
 #### 4. Subagent Management
 
 - Subagents run independently; orchestration layer spawns them for issues and comments.
-- Periodically check for completed subagents (e.g., via process status).
+- Track active subprocesses by PID with associated work item (issue/comment ID and repo).
+- Periodically check for completed subagents (e.g., via process status) and clean up.
+- Use subprocess PID to track progress and release 'lock' if subagent dies.
 
 #### 5. PR Merge Handling
 

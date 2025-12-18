@@ -57,23 +57,24 @@ def main():
             logger.error(f"Failed to check/create labels in {repo}: {e}")
 
     running = True
-    active_subprocesses = []
+    active_subprocesses = {}  # pid -> {'proc': Popen, 'work_item': str, 'id': int, 'repo': str}
     pr_comment_state = {}  # (repo, pr_number) -> {'last_comment_id': int}
 
     def cleanup_subprocesses():
         """Cleanup active subprocesses on shutdown."""
         logger.info("Cleaning up active subprocesses...")
-        for proc in active_subprocesses:
+        for pid, proc_info in active_subprocesses.items():
+            proc = proc_info['proc']
             if proc.poll() is None:  # Still running
                 try:
                     proc.terminate()
                     proc.wait(timeout=5)
-                    logger.info(f"Terminated subprocess {proc.pid}")
+                    logger.info(f"Terminated subprocess {pid} for {proc_info['work_item']} {proc_info['id']}")
                 except subprocess.TimeoutExpired:
                     proc.kill()
-                    logger.warning(f"Force killed subprocess {proc.pid}")
+                    logger.warning(f"Force killed subprocess {pid}")
                 except Exception as e:
-                    logger.error(f"Error terminating subprocess {proc.pid}: {e}")
+                    logger.error(f"Error terminating subprocess {pid}: {e}")
 
     def signal_handler(sig, frame):
         nonlocal running
@@ -95,7 +96,25 @@ def main():
                 logger.info(f"Found {len(issues)} open issues in {repo}")
                 for issue in issues:
                     labels = [label['name'] for label in issue.get('labels', [])]
-                    if config.issue_label_reserve not in labels:
+                    # Check if already reserved but no active subprocess (work not done)
+                    active_issue_pids = [pid for pid, info in active_subprocesses.items()
+                                       if info['work_item'] == 'issue' and info['id'] == issue['number']]
+                    if config.issue_label_reserve in labels:
+                        if not active_issue_pids:
+                            logger.info(f"Reserved issue {issue['number']} has no active subprocess, respawning")
+                            # Respawn subagent
+                            try:
+                                proc = subprocess.Popen(['python', 'subagent.py', str(issue['number']), repo])
+                                active_subprocesses[proc.pid] = {
+                                    'proc': proc,
+                                    'work_item': 'issue',
+                                    'id': issue['number'],
+                                    'repo': repo
+                                }
+                                logger.info(f"Respawned subagent for reserved issue {issue['number']} in {repo} (PID: {proc.pid})")
+                            except Exception as e:
+                                logger.error(f"Failed to respawn subagent for issue {issue['number']}: {e}")
+                    elif not active_issue_pids:
                         logger.info(f"Reserving issue {issue['number']} in {repo}")
                         try:
                             # Reserve the issue
@@ -103,7 +122,12 @@ def main():
                             client.update_issue_labels(owner, repo_name, issue['number'], new_labels)
                             # Spawn subagent
                             proc = subprocess.Popen(['python', 'subagent.py', str(issue['number']), repo])
-                            active_subprocesses.append(proc)
+                            active_subprocesses[proc.pid] = {
+                                'proc': proc,
+                                'work_item': 'issue',
+                                'id': issue['number'],
+                                'repo': repo
+                            }
                             logger.info(f"Spawned subagent for issue {issue['number']} in {repo} (PID: {proc.pid})")
                         except Exception as e:
                             logger.error(f"Failed to reserve or spawn subagent for issue {issue['number']}: {e}")
@@ -158,28 +182,59 @@ def main():
 
                     for comment in new_comments:
                         logger.info(f"Processing new comment/review {comment['id']} on PR #{pr_number}")
-                        # Check if already processed (has 'eyes' reaction)
+                        # Check reactions
                         try:
                             reactions = client.get_comment_reactions(owner, repo_name, comment['id'])
                             has_eyes = any(r.get('content') == 'eyes' for r in reactions)
-                            if has_eyes:
-                                logger.debug(f"Comment {comment['id']} already processed (has eyes reaction)")
-                                last_comment_id = max(last_comment_id, comment['id'])
-                                continue
+                            has_heart = any(r.get('content') == 'heart' for r in reactions)
                         except Exception as e:
                             logger.warning(f"Could not check reactions for comment {comment['id']}: {e}")
+                            has_eyes = has_heart = False
 
-                        # Add 'eyes' reaction
-                        try:
-                            client.add_comment_reaction(owner, repo_name, comment['id'], 'eyes')
-                            logger.debug(f"Added eyes reaction to comment {comment['id']}")
-                        except Exception as e:
-                            logger.warning(f"Could not add eyes reaction to comment {comment['id']}: {e}")
+                        # Check if already addressed (has 'heart' reaction)
+                        if has_heart:
+                            logger.debug(f"Comment {comment['id']} already addressed (has heart reaction)")
+                            last_comment_id = max(last_comment_id, comment['id'])
+                            continue
+
+                        # Check if reserved but work not done (has 'eyes' but no active subprocess)
+                        active_comment_pids = [pid for pid, info in active_subprocesses.items()
+                                             if info['work_item'] == 'comment' and info['id'] == comment['id']]
+                        if has_eyes and not active_comment_pids:
+                            logger.info(f"Reserved comment {comment['id']} has no active subprocess, respawning")
+                            # Respawn subagent
+                            try:
+                                proc = subprocess.Popen(['python', 'subagent.py', '--comment', str(comment['id']), repo])
+                                active_subprocesses[proc.pid] = {
+                                    'proc': proc,
+                                    'work_item': 'comment',
+                                    'id': comment['id'],
+                                    'repo': repo
+                                }
+                                logger.info(f"Respawned subagent for reserved comment {comment['id']} on PR #{pr_number} (PID: {proc.pid})")
+                            except Exception as e:
+                                logger.error(f"Failed to respawn subagent for comment {comment['id']}: {e}")
+                            last_comment_id = max(last_comment_id, comment['id'])
+                            continue
+
+                        # New comment, add 'eyes' reaction and spawn
+                        if not has_eyes:
+                            # Add 'eyes' reaction
+                            try:
+                                client.add_comment_reaction(owner, repo_name, comment['id'], 'eyes')
+                                logger.debug(f"Added eyes reaction to comment {comment['id']}")
+                            except Exception as e:
+                                logger.warning(f"Could not add eyes reaction to comment {comment['id']}: {e}")
 
                         # Spawn subagent for this comment
                         try:
                             proc = subprocess.Popen(['python', 'subagent.py', '--comment', str(comment['id']), repo])
-                            active_subprocesses.append(proc)
+                            active_subprocesses[proc.pid] = {
+                                'proc': proc,
+                                'work_item': 'comment',
+                                'id': comment['id'],
+                                'repo': repo
+                            }
                             logger.info(f"Spawned subagent for comment {comment['id']} on PR #{pr_number} (PID: {proc.pid})")
                         except Exception as e:
                             logger.error(f"Failed to spawn subagent for comment {comment['id']}: {e}")
@@ -192,7 +247,10 @@ def main():
                 logger.error(f"Error querying PRs for repo {repo}: {e}")
 
         # Clean up finished subprocesses
-        active_subprocesses[:] = [proc for proc in active_subprocesses if proc.poll() is None]
+        finished_pids = [pid for pid, info in active_subprocesses.items() if info['proc'].poll() is not None]
+        for pid in finished_pids:
+            logger.info(f"Subprocess {pid} for {active_subprocesses[pid]['work_item']} {active_subprocesses[pid]['id']} finished")
+            del active_subprocesses[pid]
 
         logger.info(f"Polling cycle completed, sleeping for {config.polling_frequency} seconds")
         time.sleep(config.polling_frequency)
