@@ -181,7 +181,8 @@ def main():
                                 'proc': proc,
                                 'work_item': 'issue',
                                 'id': issue['number'],
-                                'repo': repo
+                                'repo': repo,
+                                'retry_count': 0
                             }
                             logger.info(f"Spawned subagent for issue {issue['number']} in {repo} (PID: {proc.pid})")
                         except Exception as e:
@@ -273,8 +274,12 @@ def main():
                                     'proc': proc,
                                     'work_item': work_item,
                                     'id': comment['id'],
-                                    'repo': repo
+                                    'repo': repo,
+                                    'pr_number': pr_number,
+                                    'retry_count': 0
                                 }
+                                if work_item == 'review_comment':
+                                    active_subprocesses[proc.pid]['review_id'] = review_id
                                 logger.info(f"Spawned subagent for {work_item} {comment['id']} on PR #{pr_number} (PID: {proc.pid})")
                             except Exception as e:
                                 logger.error(f"Failed to spawn subagent for {work_item} {comment['id']}: {e}")
@@ -292,29 +297,54 @@ def main():
             proc_info = active_subprocesses[pid]
             returncode = proc_info['proc'].returncode
             logger.info(f"Subprocess {pid} for {proc_info['work_item']} {proc_info['id']} finished with returncode {returncode}")
-            if proc_info['work_item'] == 'issue' and returncode == 0:
-                # Update issue labels: add in_review (keep reserve)
-                owner, repo_name = proc_info['repo'].split('/', 1)
-                issue_number = proc_info['id']
-                try:
-                    # Get current labels
-                    issue = client.get_issue(owner, repo_name, issue_number)
-                    current_labels = [label['name'] for label in issue.get('labels', [])]
-                    if config.issue_label_in_review not in current_labels:
-                        new_labels = current_labels + [config.issue_label_in_review]
-                        client.update_issue_labels(owner, repo_name, issue_number, new_labels)
-                        logger.info(f"Updated issue {issue_number} labels: added {config.issue_label_in_review}")
-                except Exception as e:
-                    logger.error(f"Failed to update issue labels for {issue_number}: {e}")
-            elif (proc_info['work_item'] != 'issue') and returncode == 0:
-                # Add heart reaction to indicate addressed
-                owner, repo_name = proc_info['repo'].split('/', 1)
-                try:
-                    client.add_comment_reaction(owner, repo_name, proc_info['id'], 'heart')
-                    logger.info(f"Added heart reaction to {proc_info['work_item']} {proc_info['id']}")
-                except Exception as e:
-                    logger.error(f"Failed to add heart reaction to {proc_info['work_item']} {proc_info['id']}: {e}")
-            del active_subprocesses[pid]
+            if returncode == 0:
+                if proc_info['work_item'] == 'issue':
+                    # Update issue labels: add in_review (keep reserve)
+                    owner, repo_name = proc_info['repo'].split('/', 1)
+                    issue_number = proc_info['id']
+                    try:
+                        # Get current labels
+                        issue = client.get_issue(owner, repo_name, issue_number)
+                        current_labels = [label['name'] for label in issue.get('labels', [])]
+                        if config.issue_label_in_review not in current_labels:
+                            new_labels = current_labels + [config.issue_label_in_review]
+                            client.update_issue_labels(owner, repo_name, issue_number, new_labels)
+                            logger.info(f"Updated issue {issue_number} labels: added {config.issue_label_in_review}")
+                    except Exception as e:
+                        logger.error(f"Failed to update issue labels for {issue_number}: {e}")
+                else:
+                    # Add heart reaction to indicate addressed
+                    owner, repo_name = proc_info['repo'].split('/', 1)
+                    try:
+                        client.add_comment_reaction(owner, repo_name, proc_info['id'], 'heart')
+                        logger.info(f"Added heart reaction to {proc_info['work_item']} {proc_info['id']}")
+                    except Exception as e:
+                        logger.error(f"Failed to add heart reaction to {proc_info['work_item']} {proc_info['id']}: {e}")
+                del active_subprocesses[pid]
+            else:
+                # Failure, check retry
+                if proc_info['retry_count'] < 3:
+                    proc_info['retry_count'] += 1
+                    logger.info(f"Retrying {proc_info['work_item']} {proc_info['id']} (attempt {proc_info['retry_count']})")
+                    try:
+                        if proc_info['work_item'] == 'issue':
+                            proc = subprocess.Popen(['python', 'subagent.py', '--issue', str(proc_info['id']), proc_info['repo']])
+                        else:
+                            pr_number = proc_info['pr_number']
+                            if proc_info['work_item'] == 'review_comment':
+                                review_id = proc_info['review_id']
+                                proc = subprocess.Popen(['python', 'subagent.py', '--comment', str(proc_info['id']), proc_info['repo'], str(pr_number), proc_info['work_item'], str(review_id)])
+                            else:
+                                proc = subprocess.Popen(['python', 'subagent.py', '--comment', str(proc_info['id']), proc_info['repo'], str(pr_number), proc_info['work_item']])
+                        proc_info['proc'] = proc
+                        # Keep the same pid key? No, new pid.
+                        active_subprocesses[proc.pid] = proc_info
+                        logger.info(f"Respawned subagent for {proc_info['work_item']} {proc_info['id']} (PID: {proc.pid})")
+                    except Exception as e:
+                        logger.error(f"Failed to respawn subagent for {proc_info['work_item']} {proc_info['id']}: {e}")
+                else:
+                    logger.error(f"Subagent for {proc_info['work_item']} {proc_info['id']} failed after 3 attempts")
+                del active_subprocesses[pid]
 
         # Save state periodically
         save_state()
