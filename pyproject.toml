@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
     "requests",
+    "psutil",
 ]
 authors = [
     {name = "Kilo Agent Team"},
@@ -17,6 +18,7 @@ authors = [
 
 [project.scripts]
 ship-image = "ship_image:main"
+test = "test:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
