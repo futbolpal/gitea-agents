@@ -136,7 +136,7 @@ def main():
             logger.info(f"Processing {comment_type} {comment_id}: {body[:50]}...")
 
             # Get PR details to get head branch
-            pr = client.get_pull(owner, repo_name, pr_number)
+            pr = client.get_pull_request(owner, repo_name, pr_number)
             head_branch = pr['head']['ref']
             logger.info(f"Updating branch {head_branch} for PR #{pr_number}")
         except Exception as e:
