@@ -8,7 +8,6 @@ import json
 import psutil
 from config import Config
 from gitea_client import GiteaClient
-from utils import analyze_and_respond
 
 def is_issue_completed(client, owner, repo_name, issue_number, config):
     """Check if an issue is completed (has the in-review label)."""
@@ -177,7 +176,7 @@ def main():
 
                         # Spawn subagent
                         try:
-                            proc = subprocess.Popen(['python', 'subagent.py', str(issue['number']), repo])
+                            proc = subprocess.Popen(['python', 'subagent.py', '--issue', str(issue['number']), repo])
                             active_subprocesses[proc.pid] = {
                                 'proc': proc,
                                 'work_item': 'issue',
@@ -214,18 +213,6 @@ def main():
                     # Get reviews and their comments
                     reviews = client.get_pull_reviews(owner, repo_name, pr_number)
                     for review in reviews:
-                        if review.get('body'):
-                            # Treat review body as a comment
-                            review_comment = {
-                                'id': review['id'] + 1000000,  # Offset to avoid conflict with comment ids
-                                'body': review['body'],
-                                'user': review.get('user', {}),
-                                'created_at': review.get('submitted_at', review.get('created_at', '')),
-                                'type': 'review'
-                            }
-                            if review_comment['id'] > last_comment_id:
-                                new_comments.append(review_comment)
-
                         # Get review comments
                         review_comments = client.get_pull_review_comments(owner, repo_name, pr_number, review['id'])
                         for rc in review_comments:
@@ -259,7 +246,7 @@ def main():
                         # Check spawning condition: !reserved || (reserved && !hasProcWorker && !completed)
                         reserved = has_eyes
                         active_comment_pids = [pid for pid, info in active_subprocesses.items()
-                                             if info['work_item'] == 'comment' and info['id'] == comment['id']]
+                                              if info['work_item'] != 'issue' and info['id'] == comment['id']]
                         has_proc_worker = len(active_comment_pids) > 0
                         completed = is_comment_completed(client, owner, repo_name, comment['id'])
 
@@ -275,17 +262,22 @@ def main():
                                     logger.warning(f"Could not add eyes reaction to comment {comment['id']}: {e}")
 
                             # Spawn subagent
+                            work_item = comment.get('type', 'pr_comment')
                             try:
-                                proc = subprocess.Popen(['python', 'subagent.py', '--comment', str(comment['id']), repo])
+                                if work_item == 'review_comment':
+                                    review_id = comment.get('pull_request_review_id')
+                                    proc = subprocess.Popen(['python', 'subagent.py', '--comment', str(comment['id']), repo, str(pr_number), work_item, str(review_id)])
+                                else:
+                                    proc = subprocess.Popen(['python', 'subagent.py', '--comment', str(comment['id']), repo, str(pr_number), work_item])
                                 active_subprocesses[proc.pid] = {
                                     'proc': proc,
-                                    'work_item': 'comment',
+                                    'work_item': work_item,
                                     'id': comment['id'],
                                     'repo': repo
                                 }
-                                logger.info(f"Spawned subagent for comment {comment['id']} on PR #{pr_number} (PID: {proc.pid})")
+                                logger.info(f"Spawned subagent for {work_item} {comment['id']} on PR #{pr_number} (PID: {proc.pid})")
                             except Exception as e:
-                                logger.error(f"Failed to spawn subagent for comment {comment['id']}: {e}")
+                                logger.error(f"Failed to spawn subagent for {work_item} {comment['id']}: {e}")
 
                         last_comment_id = max(last_comment_id, comment['id'])
 
@@ -297,7 +289,31 @@ def main():
         # Clean up finished subprocesses
         finished_pids = [pid for pid, info in active_subprocesses.items() if info['proc'].poll() is not None]
         for pid in finished_pids:
-            logger.info(f"Subprocess {pid} for {active_subprocesses[pid]['work_item']} {active_subprocesses[pid]['id']} finished")
+            proc_info = active_subprocesses[pid]
+            returncode = proc_info['proc'].returncode
+            logger.info(f"Subprocess {pid} for {proc_info['work_item']} {proc_info['id']} finished with returncode {returncode}")
+            if proc_info['work_item'] == 'issue' and returncode == 0:
+                # Update issue labels: add in_review (keep reserve)
+                owner, repo_name = proc_info['repo'].split('/', 1)
+                issue_number = proc_info['id']
+                try:
+                    # Get current labels
+                    issue = client.get_issue(owner, repo_name, issue_number)
+                    current_labels = [label['name'] for label in issue.get('labels', [])]
+                    if config.issue_label_in_review not in current_labels:
+                        new_labels = current_labels + [config.issue_label_in_review]
+                        client.update_issue_labels(owner, repo_name, issue_number, new_labels)
+                        logger.info(f"Updated issue {issue_number} labels: added {config.issue_label_in_review}")
+                except Exception as e:
+                    logger.error(f"Failed to update issue labels for {issue_number}: {e}")
+            elif (proc_info['work_item'] != 'issue') and returncode == 0:
+                # Add heart reaction to indicate addressed
+                owner, repo_name = proc_info['repo'].split('/', 1)
+                try:
+                    client.add_comment_reaction(owner, repo_name, proc_info['id'], 'heart')
+                    logger.info(f"Added heart reaction to {proc_info['work_item']} {proc_info['id']}")
+                except Exception as e:
+                    logger.error(f"Failed to add heart reaction to {proc_info['work_item']} {proc_info['id']}: {e}")
             del active_subprocesses[pid]
 
         # Save state periodically

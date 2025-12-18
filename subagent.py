@@ -10,7 +10,6 @@ import tempfile
 import shutil
 from config import Config
 from gitea_client import GiteaClient
-from utils import analyze_and_respond
 
 def kilocode_process(prompt, repo_dir):
     """Spawn subprocess to run kilo-code for code generation."""
@@ -24,15 +23,15 @@ def kilocode_process(prompt, repo_dir):
         logger.info("kilocode completed successfully")
     return result.returncode, result.stdout, result.stderr
 
-def do_work(issue_body, repo_dir):
-    """Process the issue prompt and generate code changes."""
+def do_work(prompt, repo_dir):
+    """Process the prompt and generate code changes."""
     logger = logging.getLogger(__name__)
-    logger.info("Starting work on issue...")
+    logger.info("Starting work...")
     # Add instructions for commit and test management
     enhanced_prompt = (
         "Do not create any new issues or pull requests. Only make code changes as requested.\n"
         "Create small, focused commits for each logical change. Run all tests and ensure they pass before pushing the branch to the remote repository and finalizing the PR. Make multiple commits if needed for the PR.\n\n"
-        + issue_body
+        + prompt
     )
     ret, out, err = kilocode_process(enhanced_prompt, repo_dir)
     if ret != 0:
@@ -41,31 +40,47 @@ def do_work(issue_body, repo_dir):
     return True
 
 def main():
-    if len(sys.argv) < 3:
-        print("Usage: python subagent.py <issue_number> <repo> OR python subagent.py --comment <comment_id> <repo>", file=sys.stderr)
+    if len(sys.argv) < 4:
+        print("Usage: python subagent.py --issue <issue_number> <repo> OR python subagent.py --comment <comment_id> <repo> <pr_number> <type> [review_id]", file=sys.stderr)
         sys.exit(1)
 
     comment_id = None
     issue_number = None
     repo = None
+    pr_number = None
+    comment_type = None
+    review_id = None
 
-    if sys.argv[1] == '--comment':
+    if sys.argv[1] == '--issue':
         if len(sys.argv) < 4:
-            print("Usage: python subagent.py --comment <comment_id> <repo>", file=sys.stderr)
+            print("Usage: python subagent.py --issue <issue_number> <repo>", file=sys.stderr)
             sys.exit(1)
         try:
-            comment_id = int(sys.argv[2])
+            issue_number = int(sys.argv[2])
             repo = sys.argv[3]
         except ValueError as e:
             print(f"Invalid arguments: {e}", file=sys.stderr)
             sys.exit(1)
-    else:
+    elif sys.argv[1] == '--comment':
+        if len(sys.argv) < 6:
+            print("Usage: python subagent.py --comment <comment_id> <repo> <pr_number> <type> [review_id]", file=sys.stderr)
+            sys.exit(1)
         try:
-            issue_number = int(sys.argv[1])
-            repo = sys.argv[2]
+            comment_id = int(sys.argv[2])
+            repo = sys.argv[3]
+            pr_number = int(sys.argv[4])
+            comment_type = sys.argv[5]
+            if comment_type == 'review_comment':
+                if len(sys.argv) < 7:
+                    print("Usage: python subagent.py --comment <comment_id> <repo> <pr_number> review_comment <review_id>", file=sys.stderr)
+                    sys.exit(1)
+                review_id = int(sys.argv[6])
         except ValueError as e:
             print(f"Invalid arguments: {e}", file=sys.stderr)
             sys.exit(1)
+    else:
+        print("Invalid mode. Use --issue or --comment", file=sys.stderr)
+        sys.exit(1)
 
     os.environ['PROCESS_TYPE'] = 'subagent'
     config = Config()
@@ -74,7 +89,7 @@ def main():
     if issue_number:
         logger.info(f"Starting subagent for issue {issue_number} in repo {repo}")
     else:
-        logger.info(f"Starting subagent for comment {comment_id} in repo {repo}")
+        logger.info(f"Starting subagent for comment {comment_id} on PR #{pr_number} in repo {repo}")
 
     client = GiteaClient(config.gitea_base_url, config.gitea_token)
 
@@ -104,33 +119,87 @@ def main():
     atexit.register(cleanup)
 
     if comment_id:
-        # Handle comment processing
+        # Handle comment processing - make code changes on PR branch
         try:
-            # Get comment details (assuming it's an issue comment)
-            comment = client._make_request('GET', f'{client.base_url}/repos/{owner}/{repo_name}/issues/comments/{comment_id}')
-            logger.info(f"Processing comment {comment_id}: {comment['body'][:50]}...")
+            # Get comment details based on type
+            if comment_type == 'pr_comment':
+                comment = client._make_request('GET', f'{client.base_url}/repos/{owner}/{repo_name}/issues/comments/{comment_id}')
+                body = comment['body']
+                context = ""
+            elif comment_type == 'review_comment':
+                comment = client._make_request('GET', f'{client.base_url}/repos/{owner}/{repo_name}/pulls/{pr_number}/reviews/{review_id}/comments/{comment_id}')
+                body = comment['body']
+                context = f" on {comment['path']} at line {comment['line']}"
+            else:
+                raise ValueError(f"Unknown comment type: {comment_type}")
 
-            # Analyze and respond
-            response = analyze_and_respond(comment['body'])
-            if response:
-                try:
-                    # For now, assume it's a PR comment and respond
-                    # TODO: Determine if it's issue or PR comment and respond appropriately
-                    client.create_pull_comment(owner, repo_name, comment_id, response)
-                    logger.info(f"Responded to comment {comment_id}: {response[:50]}...")
+            logger.info(f"Processing {comment_type} {comment_id}: {body[:50]}...")
 
-                    # Add 'heart' reaction to indicate addressed
-                    client.add_comment_reaction(owner, repo_name, comment_id, 'heart')
-                    logger.info(f"Added heart reaction to comment {comment_id}")
-                except Exception as e:
-                    logger.error(f"Failed to respond to comment {comment_id}: {e}")
-
-            logger.info(f"Subagent completed processing comment {comment_id}")
-            sys.exit(0)
-
+            # Get PR details to get head branch
+            pr = client.get_pull(owner, repo_name, pr_number)
+            head_branch = pr['head']['ref']
+            logger.info(f"Updating branch {head_branch} for PR #{pr_number}")
         except Exception as e:
-            logger.error(f"Failed to process comment {comment_id}: {e}")
+            logger.error(f"Failed to get comment/review details: {e}")
             sys.exit(1)
+
+        # Clone the repository
+        repo_temp_dir = tempfile.mkdtemp()
+        logger.info(f"Cloning repo {owner}/{repo_name} to {repo_temp_dir}")
+        try:
+            # Construct clone URL with token
+            base_url = config.gitea_base_url.rstrip('/api/v1')
+            protocol = 'https' if base_url.startswith('https://') else 'http'
+            host = base_url.replace('https://', '').replace('http://', '')
+            clone_url = f"{protocol}://oauth2:{config.gitea_token}@{host}/{owner}/{repo_name}.git"
+            subprocess.run(["git", "clone", clone_url, repo_temp_dir], check=True)
+            logger.info("Repository cloned successfully")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to clone repository: {e}")
+            sys.exit(1)
+
+        # Checkout the PR branch
+        try:
+            logger.info(f"Checking out branch {head_branch}")
+            subprocess.run(['git', 'checkout', head_branch], cwd=repo_temp_dir, check=True)
+            logger.info(f"Checked out branch {head_branch}")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to checkout branch {head_branch}: {e}")
+            shutil.rmtree(repo_temp_dir)
+            sys.exit(1)
+
+        # Perform work
+        try:
+            prompt = f"Address this feedback{context}: {body}"
+            do_work(prompt, repo_temp_dir)
+        except Exception as e:
+            logger.error(f"Work failed: {e}")
+            shutil.rmtree(repo_temp_dir)
+            sys.exit(1)
+
+        # Handle commits and pushing
+        try:
+            logger.debug("Adding changes to git")
+            subprocess.run(['git', 'add', '.'], cwd=repo_temp_dir, check=True)
+
+            result = subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=repo_temp_dir)
+            if result.returncode != 0:  # There are changes
+                logger.debug("Committing changes")
+                subprocess.run(['git', 'commit', '-m', f'Address {comment_type} #{comment_id} on PR #{pr_number}'], cwd=repo_temp_dir, check=True)
+                logger.info(f"Committed changes for {comment_type} {comment_id}")
+
+                logger.debug(f"Pushing branch {head_branch}")
+                subprocess.run(['git', 'push', 'origin', head_branch], cwd=repo_temp_dir, check=True)
+                logger.info(f"Pushed branch {head_branch} to remote")
+            else:
+                logger.warning("No changes to commit")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Git operation failed: {e}")
+            shutil.rmtree(repo_temp_dir)
+            sys.exit(1)
+
+        logger.info(f"Subagent completed work for {comment_type} {comment_id} on PR #{pr_number}")
+        sys.exit(0)
 
     # Issue processing
     try:
