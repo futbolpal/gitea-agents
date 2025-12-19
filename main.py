@@ -78,7 +78,6 @@ def main():
 
     running = True
     active_subprocesses = {}  # pid -> {'proc': Popen, 'work_item': str, 'id': int, 'repo': str}
-    pr_comment_state = {}  # (repo, pr_number) -> {'last_comment_id': int}
     state_file = '/data/orchestration_state.json'
 
     # Load persisted state
@@ -93,15 +92,10 @@ def main():
                     # Keep the info but can't restore Popen
                     active_subprocesses[pid] = info.copy()
                     active_subprocesses[pid]['proc'] = None
-            # Convert string keys back to tuples for pr_comment_state
-            for key_str, value in persisted_state.get('pr_comment_state', {}).items():
-                repo, pr_number = key_str.split('|', 1)
-                pr_comment_state[(repo, int(pr_number))] = value
             logger.info(f"Loaded persisted state: {len(active_subprocesses)} active subprocesses")
     except Exception as e:
         logger.warning(f"Could not load persisted state: {e}")
         active_subprocesses = {}
-        pr_comment_state = {}
 
     def save_state():
         """Persist current state to disk."""
@@ -117,10 +111,6 @@ def main():
                         'retry_count': info.get('retry_count', 0)
                     } for pid, info in active_subprocesses.items()
                 },
-                'pr_comment_state': {
-                    f"{repo}|{pr_number}": value
-                    for (repo, pr_number), value in pr_comment_state.items()
-                }
             }
             with open(state_file, 'w') as f:
                 json.dump(state, f, indent=2)
@@ -208,17 +198,10 @@ def main():
                 prs = client.get_pulls(owner, repo_name, state='open')
                 for pr in prs:
                     pr_number = pr['number']
-                    pr_key = (repo, pr_number)
-
-                    # Initialize state for this PR if not seen before
-                    if pr_key not in pr_comment_state:
-                        pr_comment_state[pr_key] = {'last_comment_id': 0}
-
-                    last_comment_id = pr_comment_state[pr_key]['last_comment_id']
 
                     # Get PR comments
                     comments = client.get_pull_comments(owner, repo_name, pr_number)
-                    new_comments = [c for c in comments if c['id'] > last_comment_id]
+                    all_comments = [{'type': 'pr_comment', **c} for c in comments]
 
                     # Get reviews and their comments
                     reviews = client.get_pull_reviews(owner, repo_name, pr_number)
@@ -227,13 +210,12 @@ def main():
                         review_comments = client.get_pull_review_comments(owner, repo_name, pr_number, review['id'])
                         for rc in review_comments:
                             rc['type'] = 'review_comment'
-                            if rc['id'] > last_comment_id:
-                                new_comments.append(rc)
+                            all_comments.append(rc)
 
-                    if new_comments:
-                        logger.info(f"Found {len(new_comments)} new comments/reviews on PR #{pr_number}")
+                    if all_comments:
+                        logger.info(f"Checking {len(all_comments)} comments/reviews on PR #{pr_number}")
 
-                    for comment in new_comments:
+                    for comment in all_comments:
                         logger.info(f"Processing new comment/review {comment['id']} on PR #{pr_number}")
                         # Check reactions
                         try:
@@ -250,7 +232,6 @@ def main():
                         # Check if already addressed (has 'heart' reaction)
                         if has_heart:
                             logger.debug(f"Comment {comment['id']} already addressed (has heart reaction)")
-                            last_comment_id = max(last_comment_id, comment['id'])
                             continue
 
                         # Check spawning condition: !reserved || (reserved && !hasProcWorker && !completed)
@@ -293,9 +274,6 @@ def main():
                             except Exception as e:
                                 logger.error(f"Failed to spawn subagent for {work_item} {comment['id']}: {e}")
 
-                        last_comment_id = max(last_comment_id, comment['id'])
-
-                    pr_comment_state[pr_key]['last_comment_id'] = last_comment_id
 
             except Exception as e:
                 logger.error(f"Error querying PRs for repo {repo}: {e}")
