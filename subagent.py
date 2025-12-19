@@ -129,7 +129,14 @@ def main():
             elif comment_type == 'review_comment':
                 comment = client.get_pull_review_comment(owner, repo_name, pr_number, review_id, comment_id)
                 body = comment['body']
-                context = f" on {comment['path']} at line {comment['line']}"
+                path = comment.get('path', '')
+                line = comment.get('line')
+                if path and line:
+                    context = f" on {path} at line {line}"
+                elif path:
+                    context = f" on {path}"
+                else:
+                    context = ""
             else:
                 raise ValueError(f"Unknown comment type: {comment_type}")
 
