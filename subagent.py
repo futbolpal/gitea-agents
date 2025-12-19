@@ -130,13 +130,20 @@ def main():
                 comment = client.get_pull_review_comment(owner, repo_name, pr_number, review_id, comment_id)
                 body = comment['body']
                 path = comment.get('path', '')
-                line = comment.get('line')
-                if path and line:
-                    context = f" on {path} at line {line}"
-                elif path:
-                    context = f" on {path}"
-                else:
-                    context = ""
+                position = comment.get('position')
+                diff_hunk = comment.get('diff_hunk', '')
+
+                context_parts = []
+                if path:
+                    if position:
+                        context_parts.append(f"on {path} at line {position}")
+                    else:
+                        context_parts.append(f"on {path}")
+
+                if diff_hunk:
+                    context_parts.append(f"diff:\n{diff_hunk}")
+
+                context = (" " + " | ".join(context_parts)) if context_parts else ""
             else:
                 raise ValueError(f"Unknown comment type: {comment_type}")
 
