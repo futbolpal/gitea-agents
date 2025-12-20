@@ -27,10 +27,15 @@ def do_work(prompt, repo_dir):
     """Process the prompt and generate code changes."""
     logger = logging.getLogger(__name__)
     logger.info("Starting work...")
+    # Check for custom mode kilo-agents
+    mode_file = os.path.join(repo_dir, '.kilocode', 'kilo-agents')
+    use_mode = os.path.exists(mode_file)
+    mode_instruction = "Use mode kilo-agents." if use_mode else ""
     # Add instructions for commit and test management
     enhanced_prompt = (
         "Do not create any new issues or pull requests. Only make code changes as requested.\n"
         "Create small, focused commits for each logical change. Run all tests and ensure they pass before pushing the branch to the remote repository and finalizing the PR. Make multiple commits if needed for the PR.\n\n"
+        + mode_instruction + ("\n\n" if mode_instruction else "")
         + prompt
     )
     ret, out, err = kilocode_process(enhanced_prompt, repo_dir)
