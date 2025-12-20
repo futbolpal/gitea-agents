@@ -1,6 +1,8 @@
 # Kilocode Agent for Gitea
 
-An autonomous agent that monitors Gitea repositories for issues, automatically generates code solutions using the kilocode AI tool, and creates pull requests for review.
+An autonomous agent that monitors Gitea repositories for issues, automatically generates code solutions using the kilocode AI tool, and creates pull requests for review.  
+
+Comment on the resulting PR or add review comments to iterate.  The agent will respond to your feedback and update the PR!
 
 ## Architecture
 
