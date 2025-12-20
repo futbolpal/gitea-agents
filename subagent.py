@@ -8,6 +8,7 @@ import atexit
 import subprocess
 import tempfile
 import shutil
+import re
 from config import Config
 from gitea_client import GiteaClient
 
@@ -153,6 +154,21 @@ def main():
             pr = client.get_pull_request(owner, repo_name, pr_number)
             head_branch = pr['head']['ref']
             logger.info(f"Updating branch {head_branch} for PR #{pr_number}")
+
+            # Extract original issue prompt from PR body
+            pr_body = pr.get('body', '')
+            match = re.search(r'Closes #(\d+)', pr_body)
+            if match:
+                issue_num = int(match.group(1))
+                try:
+                    issue = client.get_issue(owner, repo_name, issue_num)
+                    original_prompt = issue.get('body', '')
+                    logger.info(f"Using original issue prompt from issue #{issue_num}")
+                except Exception as e:
+                    logger.warning(f"Could not retrieve original issue #{issue_num}: {e}")
+                    original_prompt = ''
+            else:
+                original_prompt = ''
         except Exception as e:
             logger.error(f"Failed to get comment/review details: {e}")
             sys.exit(1)
@@ -184,7 +200,10 @@ def main():
 
         # Perform work
         try:
-            prompt = f"Address this feedback{context}: {body}"
+            if original_prompt:
+                prompt = f"{original_prompt}\n\nAddress this feedback{context}: {body}"
+            else:
+                prompt = f"Address this feedback{context}: {body}"
             do_work(prompt, repo_temp_dir)
         except Exception as e:
             logger.error(f"Work failed: {e}")
