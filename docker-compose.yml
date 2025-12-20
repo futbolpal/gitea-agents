@@ -1,0 +1,21 @@
+# Sample docker-compose deployment
+services:
+  kilo-agents:
+    container_name: kilo-agents
+    build: .
+    user: 1000:1000
+    volumes:
+      - /appdata/kilo-agents/.kilocode:/.kilocode
+      - /appdata/kilo-agents/.gitconfig:/.gitconfig
+      - /appdata/kilo-agents/data:/data
+    environment:
+      - LOG_FILE=/tmp/kilo-agents.log
+      - LOG_LEVEL=debug
+      - GITEA_BASE_URL={repositoryUrl}
+      - GITEA_TOKEN={service token}
+      - GITEA_REPOS={(owner)/(repo), (owner)/(repo), (owner)/*}
+      - ISSUE_LABEL_RESERVE=agent-working
+      - ISSUE_LABEL_IN_REVIEW=agent-in-review
+      - KILO_PROVIDER=default
+      - KILOCODE_MODEL=x-ai/grok-code-fast-1
+    restart: unless-stopped
