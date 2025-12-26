@@ -37,6 +37,24 @@ def main():
 
     client = GiteaClient(config.gitea_base_url, config.gitea_token)
 
+    # Expand any 'owner/*' patterns in gitea_repos
+    expanded_repos = []
+    for repo_pattern in config.gitea_repos:
+        if repo_pattern.endswith('/*'):
+            owner = repo_pattern[:-2]  # Remove '/*'
+            try:
+                repos = client.get_repos(owner)
+                for repo in repos:
+                    expanded_repos.append(f"{owner}/{repo['name']}")
+                logger.info(f"Expanded {repo_pattern} to {len(repos)} repos")
+            except Exception as e:
+                logger.error(f"Failed to expand {repo_pattern}: {e}")
+                # Keep the pattern as is? Or skip?
+                # For now, skip to avoid errors
+        else:
+            expanded_repos.append(repo_pattern)
+    config.gitea_repos = expanded_repos
+
     # Validate API connection
     try:
         logger.debug(f"Validating API connection with base_url: {client.base_url}")
