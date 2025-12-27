@@ -30,7 +30,11 @@ def do_work(prompt, repo_dir):
     # Add instructions for commit and test management
     enhanced_prompt = (
         "Do not create any new issues or pull requests. Only make code changes as requested.\n"
-        "Create small, focused commits for each logical change. Run all tests and ensure they pass before pushing the branch to the remote repository and finalizing the PR. Make multiple commits if needed for the PR.\n\n"
+        "Create small, focused commits for each logical change.\n"
+        "Make multiple commits if needed for the PR.\n"
+        "Run all tests and ensure they pass before pushing the branch to the remote repository and finalizing the PR.\n"
+        "Start by examining any changes on the current branch to understand the work that has already been done.\n"
+        "\n"
         + prompt
     )
     ret, out, err = kilocode_process(enhanced_prompt, repo_dir)
