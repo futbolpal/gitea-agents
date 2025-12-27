@@ -1,6 +1,6 @@
 # Kilocode Agent for Gitea
 
-An experience that allows agents to automatically code solutions to Gitea Issues and generate PRs.
+An experience that allows agents to automatically code solutions to Gitea Issues and make code changes.
 
 ## Definitions
 
@@ -11,7 +11,6 @@ An experience that allows agents to automatically code solutions to Gitea Issues
 ## Goal
 
 Orchestration polls for new, unlabeled issues to initiate work.
-Orchestration polls for pull comments and review comments to initiate work.
 
 The agent polls for new or unlabeled repo issues to initiate work.
 For each qualifying issue, the agent:
@@ -19,9 +18,11 @@ For each qualifying issue, the agent:
 - reserves the issue by tagging with ISSUE_LABEL_RESERVE
 - spawns a subagent to complete the task.
 
-When the subagent completes its work, it creates a pull request (PR).
+When the subagent completes its work, it makes code changes and commits them.
 
-Orchestration monitors PRs for new comments and reviews, spawning subagents to handle feedback.
+The agent does not create new issues or pull requests. It only makes code changes as requested in existing issues.
+
+Create small, focused commits for each logical change. Run all tests and ensure they pass before committing changes.
 
 ## Orchestration Workflow
 
@@ -44,10 +45,6 @@ The orchestration layer manages the overall process of monitoring repositories, 
   - Query Gitea API for issues (open, unlabeled).
   - For each issue, check spawning condition: !reserved || (reserved && !hasProcWorker && !completed)
     - Issue is completed if it has ISSUE_LABEL_IN_REVIEW label.
-  - For active PRs, query for comments and review comments.
-  - For each comment, check spawning condition: !reserved || (reserved && !hasProcWorker && !completed)
-    - Comment is reserved if it has 'eyes' reaction.
-    - Comment is completed if it has 'heart' reaction.
 
 #### 3. Work Processing
 
@@ -55,11 +52,6 @@ The orchestration layer manages the overall process of monitoring repositories, 
   - Apply ISSUE_LABEL_RESERVE to reserve it.
   - Spawn a subagent subprocess, passing Issue ID and context.
   - Log the subagent creation.
-- For each qualifying comment (PR or review):
-  - Add the 'eyes' reaction.
-  - Spawn a subagent subprocess, passing Comment ID and context.
-  - Log the subagent creation.
-- When a comment is addressed, add a 'heart' reaction.
 
 #### 4. Subagent Management
 
@@ -68,13 +60,7 @@ The orchestration layer manages the overall process of monitoring repositories, 
 - Periodically check for completed subagents (e.g., via process status) and clean up.
 - Use subprocess PID to track progress and release 'lock' if subagent dies.
 
-#### 5. PR Merge Handling
-
-- Poll for merged PRs associated with issues.
-- When a PR is merged, the associated issue is automatically closed (if PR contains 'Closes #issue').
-- Clean up any subagent resources if applicable.
-
-#### 6. Error Handling
+#### 5. Error Handling
 
 - Handle API failures (e.g., retry with backoff).
 - Log errors and notify owner if critical.
@@ -90,10 +76,8 @@ The orchestration layer manages the overall process of monitoring repositories, 
 ```
 Agent Start -> Load Config -> Validate API
 Loop: Poll Issues -> Filter Qualifying -> Reserve -> Spawn Subagent
-Subagent: Work -> Create PR -> Exit
-Loop: Poll PR Comments/Reviews -> Filter Qualifying -> Add Eyes -> Spawn Subagent
-Subagent: Analyze Comment -> Respond -> Exit
-PR Merged -> Issue Closed -> Cleanup
+Subagent: Work -> Commit Changes -> Exit
+Issue Resolved -> Cleanup
 ```
 
 ## Configuration
