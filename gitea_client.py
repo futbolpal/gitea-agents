@@ -117,6 +117,24 @@ class GiteaClient:
         logger.debug(f"Getting issue #{issue_number} from {owner}/{repo}")
         return self._make_request('GET', url)
 
+    def get_repos(self, owner):
+        """Get all repositories for an owner (user or org)."""
+        # Try user repos first
+        try:
+            url = f'{self.base_url}/users/{owner}/repos'
+            logger.debug(f"Getting user repos for {owner}")
+            return self._make_request('GET', url)
+        except Exception as e:
+            logger.debug(f"Failed to get user repos for {owner}: {e}")
+            # Try org repos
+            try:
+                url = f'{self.base_url}/orgs/{owner}/repos'
+                logger.debug(f"Getting org repos for {owner}")
+                return self._make_request('GET', url)
+            except Exception as e2:
+                logger.error(f"Failed to get repos for {owner}: {e2}")
+                raise
+
     def get_repo(self, owner, repo):
         """Get repository details."""
         url = f'{self.base_url}/repos/{owner}/{repo}'
