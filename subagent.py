@@ -198,8 +198,14 @@ def main():
 
             result = subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=repo_temp_dir)
             if result.returncode != 0:  # There are changes
+                # Get changed files for better commit message
+                diff_result = subprocess.run(['git', 'diff', '--cached', '--name-only'], cwd=repo_temp_dir, capture_output=True, text=True)
+                changed_files = diff_result.stdout.strip().split('\n') if diff_result.stdout.strip() else []
+                files_str = ', '.join(changed_files[:5]) + ('...' if len(changed_files) > 5 else '')
+
                 logger.debug("Committing changes")
-                subprocess.run(['git', 'commit', '-m', f'Address {comment_type} #{comment_id} on PR #{pr_number}'], cwd=repo_temp_dir, check=True)
+                commit_msg = f'Address {comment_type} #{comment_id} on PR #{pr_number}: {body[:50].replace(chr(10), " ").replace(chr(13), " ")}... Changed files: {files_str}'
+                subprocess.run(['git', 'commit', '-m', commit_msg], cwd=repo_temp_dir, check=True)
                 logger.info(f"Committed changes for {comment_type} {comment_id}")
 
                 logger.debug(f"Pushing branch {head_branch}")
@@ -269,9 +275,15 @@ def main():
         result = subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=repo_temp_dir)
         logger.debug(f"Git diff result: {result.returncode}")
         if result.returncode != 0:  # There are changes
+            # Get changed files for better commit message
+            diff_result = subprocess.run(['git', 'diff', '--cached', '--name-only'], cwd=repo_temp_dir, capture_output=True, text=True)
+            changed_files = diff_result.stdout.strip().split('\n') if diff_result.stdout.strip() else []
+            files_str = ', '.join(changed_files[:5]) + ('...' if len(changed_files) > 5 else '')
+
             logger.debug("Committing changes")
             # Commit
-            subprocess.run(['git', 'commit', '-m', f'Fix issue #{issue_number}: {issue["title"]}'], cwd=repo_temp_dir, check=True)
+            commit_msg = f'Fix issue #{issue_number}: {issue["title"]} - {issue["body"][:50].replace(chr(10), " ").replace(chr(13), " ")}... Changed files: {files_str}'
+            subprocess.run(['git', 'commit', '-m', commit_msg], cwd=repo_temp_dir, check=True)
             logger.info(f"Committed changes for issue {issue_number}")
 
             logger.debug(f"Pushing branch {head_branch}")
