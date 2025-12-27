@@ -8,6 +8,7 @@ import atexit
 import subprocess
 import tempfile
 import shutil
+import re
 from config import Config
 from gitea_client import GiteaClient
 
@@ -184,7 +185,11 @@ def main():
 
         # Perform work
         try:
-            prompt = f"Address this feedback{context}: {body}"
+            base_prompt = f"Address this feedback{context}: {body}"
+            if issue_context:
+                base_prompt += f"\n\n{issue_context}"
+            base_prompt += "\n\nTo see the existing changes on this branch, run: git diff"
+            prompt = base_prompt
             do_work(prompt, repo_temp_dir)
         except Exception as e:
             logger.error(f"Work failed: {e}")
