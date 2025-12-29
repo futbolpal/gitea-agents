@@ -14,7 +14,7 @@ from gitea_client import GiteaClient
 def kilocode_process(prompt, repo_dir):
     """Spawn subprocess to run kilo-code for code generation."""
     logger = logging.getLogger(__name__)
-    cmd = ["kilocode", "-a", prompt]
+    cmd = ["kilocode", "-a", prompt, '>', '/data/output.txt']
     logger.info(f"Running kilo-code with prompt: {prompt[:50]}...")
     result = subprocess.run(cmd, cwd=repo_dir, capture_output=True, text=True)
     if result.returncode != 0:
