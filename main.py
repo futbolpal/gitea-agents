@@ -252,14 +252,19 @@ def main():
                             logger.debug(f"Comment {comment['id']} already addressed (has heart reaction)")
                             continue
 
-                        # Check spawning condition: !reserved || (reserved && !hasProcWorker && !completed)
+                        # Check spawning condition: !reserved || (reserved && !hasProcWorker && !completed && !hasPrWorker)
                         reserved = has_eyes
                         active_comment_pids = [pid for pid, info in active_subprocesses.items()
                                               if info['work_item'] != 'issue' and info['id'] == comment['id']]
                         has_proc_worker = len(active_comment_pids) > 0
                         completed = is_comment_completed(client, owner, repo_name, comment['id'], logger)
 
-                        should_spawn = not reserved or (reserved and not has_proc_worker and not completed)
+                        # Check if there's already an active subagent for this PR
+                        active_pr_pids = [pid for pid, info in active_subprocesses.items()
+                                          if info.get('pr_number') == pr_number and info['work_item'] != 'issue']
+                        has_pr_worker = len(active_pr_pids) > 0
+
+                        should_spawn = not reserved or (reserved and not has_proc_worker and not completed and not has_pr_worker)
 
                         if should_spawn:
                             # Add 'eyes' reaction if not already
