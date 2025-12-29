@@ -25,10 +25,12 @@ def kilocode_process(prompt, repo_dir, config):
         logger.info("kilocode completed successfully")
     return result.returncode, "", result.stderr
 
-def do_work(prompt, repo_dir, config):
+def do_work(prompt, repo_dir, config, head_branch):
     """Process the prompt and generate code changes."""
     logger = logging.getLogger(__name__)
     logger.info("Starting work...")
+    logger.info(f"Checking out branch {head_branch}")
+    subprocess.run(['git', 'checkout', head_branch], cwd=repo_dir, check=True)
     # Add instructions for commit and test management
     enhanced_prompt = (
         "Do not create any new issues or pull requests. Only make code changes as requested.\n"
@@ -191,7 +193,7 @@ def main():
         # Perform work
         try:
             prompt = f"Address this feedback{context}: {body}"
-            do_work(prompt, repo_temp_dir, config)
+            do_work(prompt, repo_temp_dir, config, head_branch)
         except Exception as e:
             logger.error(f"Work failed: {e}")
             shutil.rmtree(repo_temp_dir)
@@ -252,20 +254,24 @@ def main():
         sys.exit(1)
 
     # Perform actual work
+    head_branch = f"fix-issue-{issue_number}"
     try:
-        do_work(issue['body'], repo_temp_dir, config)
+        logger.debug(f"Creating branch {head_branch}")
+        subprocess.run(['git', 'checkout', '-b', head_branch], cwd=repo_temp_dir, check=True)
+        logger.info(f"Created and checked out branch {head_branch}")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to create branch {head_branch}: {e}")
+        shutil.rmtree(repo_temp_dir)
+        sys.exit(1)
+
+    try:
+        do_work(issue['body'], repo_temp_dir, config, head_branch)
     except Exception as e:
         logger.error(f"Work failed: {e}")
         shutil.rmtree(repo_temp_dir)
         sys.exit(1)
 
-    # Handle branch creation, commits, and pushing since kilo-code may not do it
-    head_branch = f"fix-issue-{issue_number}"
-    try:
-        logger.debug(f"Creating branch {head_branch}")
-        # Create and checkout branch
-        subprocess.run(['git', 'checkout', '-b', head_branch], cwd=repo_temp_dir, check=True)
-        logger.info(f"Created and checked out branch {head_branch}")
+    # Handle commits and pushing since kilo-code may not do it
 
         logger.debug("Adding changes to git")
         # Add all changes
