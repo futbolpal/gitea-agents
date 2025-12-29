@@ -178,7 +178,7 @@ def main():
                     has_proc_worker = len(active_issue_pids) > 0
                     completed = is_issue_completed(client, owner, repo_name, issue['number'], config, logger)
 
-                    should_spawn = not reserved or (reserved and not has_proc_worker and not completed)
+                    should_spawn = (not reserved or (reserved and not has_proc_worker and not completed)) and len(active_subprocesses) < config.max_concurrent_subagents
 
                     if should_spawn:
                         if not reserved:
@@ -264,7 +264,7 @@ def main():
                                           if info.get('pr_number') == pr_number and info['work_item'] != 'issue']
                         has_pr_worker = len(active_pr_pids) > 0
 
-                        should_spawn = not reserved or (reserved and not has_proc_worker and not completed and not has_pr_worker)
+                        should_spawn = (not reserved or (reserved and not has_proc_worker and not completed and not has_pr_worker)) and len(active_subprocesses) < config.max_concurrent_subagents
 
                         if should_spawn:
                             # Add 'eyes' reaction if not already

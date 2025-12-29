@@ -147,6 +147,7 @@ class TestIntegration(unittest.TestCase):
             mock_config.issue_label_reserve = 'agent-working'
             mock_config.issue_label_in_review = 'agent-in-review'
             mock_config.polling_frequency = 1
+            mock_config.max_concurrent_subagents = 10
             mock_config_class.return_value = mock_config
 
             # Mock logging
@@ -203,6 +204,7 @@ class TestIntegration(unittest.TestCase):
             mock_config = MagicMock()
             mock_config.gitea_repos = ['owner/repo']
             mock_config.polling_frequency = 1
+            mock_config.max_concurrent_subagents = 10
             mock_config_class.return_value = mock_config
 
             with patch('main.logging') as mock_logging:
@@ -260,6 +262,7 @@ class TestIntegration(unittest.TestCase):
             mock_config = MagicMock()
             mock_config.gitea_repos = ['owner/repo']
             mock_config.polling_frequency = 1
+            mock_config.max_concurrent_subagents = 10
             mock_config_class.return_value = mock_config
 
             with patch('main.logging') as mock_logging:
@@ -321,6 +324,7 @@ class TestIntegration(unittest.TestCase):
             mock_config = MagicMock()
             mock_config.gitea_repos = ['owner/repo']
             mock_config.polling_frequency = 1
+            mock_config.max_concurrent_subagents = 10
             mock_config_class.return_value = mock_config
 
             with patch('main.logging') as mock_logging:

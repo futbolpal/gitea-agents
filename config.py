@@ -23,6 +23,7 @@ class Config:
         self.polling_frequency = int(os.getenv('POLLING_FREQUENCY', '60'))
         self.issue_label_reserve = os.getenv('ISSUE_LABEL_RESERVE', 'agent-working')
         self.issue_label_in_review = os.getenv('ISSUE_LABEL_IN_REVIEW', 'agent-in-review')
+        self.max_concurrent_subagents = int(os.getenv('MAX_CONCURRENT_SUBAGENTS', '3'))
         self.data_dir = os.getenv('DATA_DIR', '/data')
         self.log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
         self.log_file = os.getenv('LOG_FILE', os.path.join(self.data_dir, 'kilocode_agent.log'))
