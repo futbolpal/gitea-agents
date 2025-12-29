@@ -14,14 +14,15 @@ from gitea_client import GiteaClient
 def kilocode_process(prompt, repo_dir):
     """Spawn subprocess to run kilo-code for code generation."""
     logger = logging.getLogger(__name__)
-    cmd = ["kilocode", "-m", "orchestrator", "-a", prompt, '>', '/data/output.txt']
+    cmd = ["kilocode", "-m", "orchestrator", "-j"]
     logger.info(f"Running kilo-code with prompt: {prompt[:50]}...")
-    result = subprocess.run(cmd, cwd=repo_dir, capture_output=True, text=True)
+    with open('/data/output.json', 'w') as f:
+        result = subprocess.run(cmd, input=prompt, cwd=repo_dir, stdout=f, stderr=subprocess.PIPE, text=True)
     if result.returncode != 0:
         logger.error(f"kilocode failed: {result.stderr}")
     else:
         logger.info("kilocode completed successfully")
-    return result.returncode, result.stdout, result.stderr
+    return result.returncode, "", result.stderr
 
 def do_work(prompt, repo_dir):
     """Process the prompt and generate code changes."""
