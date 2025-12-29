@@ -11,12 +11,13 @@ import shutil
 from config import Config
 from gitea_client import GiteaClient
 
-def kilocode_process(prompt, repo_dir):
+def kilocode_process(prompt, repo_dir, config):
     """Spawn subprocess to run kilo-code for code generation."""
     logger = logging.getLogger(__name__)
-    cmd = ["kilocode", "-m", "orchestrator", "-j"]
+    cmd = ["kilocode", "-a", "-m", "orchestrator", "-j"]
     logger.info(f"Running kilo-code with prompt: {prompt[:50]}...")
-    with open('/data/output.json', 'w') as f:
+    output_path = os.path.join(config.data_dir, 'output.json')
+    with open(output_path, 'w') as f:
         result = subprocess.run(cmd, input=prompt, cwd=repo_dir, stdout=f, stderr=subprocess.PIPE, text=True)
     if result.returncode != 0:
         logger.error(f"kilocode failed: {result.stderr}")
@@ -24,7 +25,7 @@ def kilocode_process(prompt, repo_dir):
         logger.info("kilocode completed successfully")
     return result.returncode, "", result.stderr
 
-def do_work(prompt, repo_dir):
+def do_work(prompt, repo_dir, config):
     """Process the prompt and generate code changes."""
     logger = logging.getLogger(__name__)
     logger.info("Starting work...")
@@ -38,7 +39,7 @@ def do_work(prompt, repo_dir):
         "\n"
         + prompt
     )
-    ret, out, err = kilocode_process(enhanced_prompt, repo_dir)
+    ret, out, err = kilocode_process(enhanced_prompt, repo_dir, config)
     if ret != 0:
         raise Exception(f"Code generation failed: {err}")
     logger.info("Code generation completed")
@@ -190,7 +191,7 @@ def main():
         # Perform work
         try:
             prompt = f"Address this feedback{context}: {body}"
-            do_work(prompt, repo_temp_dir)
+            do_work(prompt, repo_temp_dir, config)
         except Exception as e:
             logger.error(f"Work failed: {e}")
             shutil.rmtree(repo_temp_dir)
@@ -252,7 +253,7 @@ def main():
 
     # Perform actual work
     try:
-        do_work(issue['body'], repo_temp_dir)
+        do_work(issue['body'], repo_temp_dir, config)
     except Exception as e:
         logger.error(f"Work failed: {e}")
         shutil.rmtree(repo_temp_dir)

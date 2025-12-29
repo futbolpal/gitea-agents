@@ -23,8 +23,9 @@ class Config:
         self.polling_frequency = int(os.getenv('POLLING_FREQUENCY', '60'))
         self.issue_label_reserve = os.getenv('ISSUE_LABEL_RESERVE', 'agent-working')
         self.issue_label_in_review = os.getenv('ISSUE_LABEL_IN_REVIEW', 'agent-in-review')
+        self.data_dir = os.getenv('DATA_DIR', '/data')
         self.log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
-        self.log_file = os.getenv('LOG_FILE', '/data/kilocode_agent.log')
+        self.log_file = os.getenv('LOG_FILE', os.path.join(self.data_dir, 'kilocode_agent.log'))
         self.max_log_size = int(os.getenv('MAX_LOG_SIZE', '10485760'))  # 10MB default
         self.backup_count = int(os.getenv('LOG_BACKUP_COUNT', '5'))
         self.process_type = os.getenv('PROCESS_TYPE', 'unknown')

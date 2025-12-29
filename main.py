@@ -96,7 +96,7 @@ def main():
 
     running = True
     active_subprocesses = {}  # pid -> {'proc': Popen, 'work_item': str, 'id': int, 'repo': str}
-    state_file = '/data/orchestration_state.json'
+    state_file = os.path.join(config.data_dir, 'orchestration_state.json')
 
     # Load persisted state
     try:
