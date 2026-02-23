@@ -17,6 +17,31 @@ def _strip_api_suffix(base_url):
         return base_url[:-7]
     return base_url
 
+def _load_prompt_template(config):
+    default_template = (
+        "Do not create any new issues or pull requests. Only make code changes as requested.\n"
+        "Create small, focused commits for each logical change.\n"
+        "Make multiple commits if needed for the PR.\n"
+        "Start by examining any changes on the current branch to understand the work that has already been done.\n"
+        "\n"
+        "{prompt}"
+    )
+    path = config.prompt_template_path
+    if not path:
+        return default_template
+    try:
+        with open(path, 'r', encoding='utf-8') as handle:
+            template = handle.read().strip()
+        if not template:
+            return default_template
+        return template
+    except FileNotFoundError:
+        return default_template
+    except Exception as exc:
+        logger = logging.getLogger(__name__)
+        logger.warning("Failed to load prompt template from %s: %s", path, exc)
+        return default_template
+
 def do_work(prompt, repo_dir, config, head_branch):
     """Process the prompt and generate code changes."""
     logger = logging.getLogger(__name__)
@@ -24,14 +49,8 @@ def do_work(prompt, repo_dir, config, head_branch):
     logger.info(f"Checking out branch {head_branch}")
     subprocess.run(['git', 'checkout', head_branch], cwd=repo_dir, check=True)
     # Add instructions for commit and test management
-    enhanced_prompt = (
-        "Do not create any new issues or pull requests. Only make code changes as requested.\n"
-        "Create small, focused commits for each logical change.\n"
-        "Make multiple commits if needed for the PR.\n"
-        "Start by examining any changes on the current branch to understand the work that has already been done.\n"
-        "\n"
-        + prompt
-    )
+    template = _load_prompt_template(config)
+    enhanced_prompt = template.format(prompt=prompt)
     result, output_path = run_agent(enhanced_prompt, repo_dir, config)
     if result.returncode != 0:
         logger.error("Agent CLI failed, output at %s", output_path)

@@ -1,0 +1,6 @@
+Do not create any new issues or pull requests. Only make code changes as requested.
+Create small, focused commits for each logical change.
+Make multiple commits if needed for the PR.
+Start by examining any changes on the current branch to understand the work that has already been done.
+
+{prompt}

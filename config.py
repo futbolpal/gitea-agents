@@ -36,6 +36,7 @@ class Config:
         self.codex_exec_args = shlex.split(os.getenv('CODEX_EXEC_ARGS', '--full-auto'))
         self.codex_prompt_mode = os.getenv('CODEX_PROMPT_MODE', 'stdin').strip().lower()
         self.codex_model = os.getenv('CODEX_MODEL')
+        self.prompt_template_path = os.getenv('PROMPT_TEMPLATE_PATH', 'prompt_template.txt')
 
     def setup_logging(self):
         """Setup logging configuration with console and file handlers."""
