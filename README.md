@@ -64,6 +64,11 @@ Set the following environment variables:
 - `ISSUE_LABEL_RESERVE`: Label for reserving issues (default: `agent-working`)
 - `LOG_LEVEL`: Logging level (default: `INFO`)
 - `LOG_FILE`: Log file path (default: `kilocode_agent.log`)
+- `AGENT_CLI`: Which CLI to run for code generation (`kilocode` or `codex`, default: `kilocode`)
+- `KILOCODE_ARGS`: Override kilocode CLI args (default: `-a -m orchestrator -j`)
+- `CODEX_EXEC_ARGS`: Override codex exec args (default: `--full-auto`)
+- `CODEX_PROMPT_MODE`: How to pass prompts to codex (`stdin` or `arg`, default: `stdin`)
+- `CODEX_MODEL`: Optional codex model name (passed as `-m`)
 
 ## Running
 
@@ -98,11 +103,17 @@ Set the following environment variables:
    ```bash
    curl -fsSL https://kilo.ai/install.sh | sh
    ```
+3. (Optional) Install Codex CLI:
+   ```bash
+   npm install -g @openai/codex
+   ```
 
-3. Run the agent:
+4. Run the agent:
    ```bash
    python main.py
    ```
+
+To use Codex CLI for code generation, set `AGENT_CLI=codex`.
 
 ## Testing
 

@@ -10,20 +10,12 @@ import tempfile
 import shutil
 from config import Config
 from gitea_client import GiteaClient
+from agent_runner import run_agent
 
-def kilocode_process(prompt, repo_dir, config):
-    """Spawn subprocess to run kilo-code for code generation."""
-    logger = logging.getLogger(__name__)
-    cmd = ["kilocode", "-a", "-m", "orchestrator", "-j"]
-    logger.info(f"Running kilo-code with prompt: {prompt[:50]}...")
-    output_path = os.path.join(config.data_dir, 'output.json')
-    with open(output_path, 'w') as f:
-        result = subprocess.run(cmd, input=prompt, cwd=repo_dir, stdout=f, stderr=subprocess.PIPE, text=True)
-    if result.returncode != 0:
-        logger.error(f"kilocode failed: {result.stderr}")
-    else:
-        logger.info("kilocode completed successfully")
-    return result.returncode, "", result.stderr
+def _strip_api_suffix(base_url):
+    if base_url.endswith('/api/v1'):
+        return base_url[:-7]
+    return base_url
 
 def do_work(prompt, repo_dir, config, head_branch):
     """Process the prompt and generate code changes."""
@@ -36,15 +28,15 @@ def do_work(prompt, repo_dir, config, head_branch):
         "Do not create any new issues or pull requests. Only make code changes as requested.\n"
         "Create small, focused commits for each logical change.\n"
         "Make multiple commits if needed for the PR.\n"
-        "Run all tests and ensure they pass before pushing the branch to the remote repository and finalizing the PR.\n"
         "Start by examining any changes on the current branch to understand the work that has already been done.\n"
         "\n"
         + prompt
     )
-    ret, out, err = kilocode_process(enhanced_prompt, repo_dir, config)
-    if ret != 0:
-        raise Exception(f"Code generation failed: {err}")
-    logger.info("Code generation completed")
+    result, output_path = run_agent(enhanced_prompt, repo_dir, config)
+    if result.returncode != 0:
+        logger.error("Agent CLI failed, output at %s", output_path)
+        raise Exception(f"Code generation failed: {result.stderr}")
+    logger.info("Code generation completed (output at %s)", output_path)
     return True
 
 def main():
@@ -170,7 +162,7 @@ def main():
         logger.info(f"Cloning repo {owner}/{repo_name} to {repo_temp_dir}")
         try:
             # Construct clone URL with token
-            base_url = config.gitea_base_url.rstrip('/api/v1')
+            base_url = _strip_api_suffix(config.gitea_base_url)
             protocol = 'https' if base_url.startswith('https://') else 'http'
             host = base_url.replace('https://', '').replace('http://', '')
             clone_url = f"{protocol}://oauth2:{config.gitea_token}@{host}/{owner}/{repo_name}.git"
@@ -243,7 +235,7 @@ def main():
     logger.info(f"Cloning repo {owner}/{repo_name} to {repo_temp_dir}")
     try:
         # Construct clone URL with token, preserving protocol
-        base_url = config.gitea_base_url.rstrip('/api/v1')
+        base_url = _strip_api_suffix(config.gitea_base_url)
         protocol = 'https' if base_url.startswith('https://') else 'http'
         host = base_url.replace('https://', '').replace('http://', '')
         clone_url = f"{protocol}://oauth2:{config.gitea_token}@{host}/{owner}/{repo_name}.git"
@@ -272,7 +264,8 @@ def main():
         sys.exit(1)
 
     # Handle commits and pushing since kilo-code may not do it
-
+    changes_made = False
+    try:
         logger.debug("Adding changes to git")
         # Add all changes
         subprocess.run(['git', 'add', '.'], cwd=repo_temp_dir, check=True)
@@ -290,34 +283,36 @@ def main():
             # Push
             subprocess.run(['git', 'push', 'origin', head_branch], cwd=repo_temp_dir, check=True)
             logger.info(f"Pushed branch {head_branch} to remote")
+            changes_made = True
         else:
             logger.warning("No changes to commit")
-            # Still create PR if branch exists, but since no push, branch won't exist
-            # For now, assume changes are made
     except subprocess.CalledProcessError as e:
         logger.error(f"Git operation failed: {e}")
         shutil.rmtree(repo_temp_dir)
         sys.exit(1)
-    try:
-        logger.debug(f"Creating PR with head={head_branch}")
-        # Get the default branch for the repository
-        repo_info = client.get_repo(owner, repo_name)
-        default_branch = repo_info.get('default_branch', 'main')
-        logger.info(f"Using default branch: {default_branch}")
-        pr = client.create_pull_request(
-            owner, repo_name,
-            f"Fix issue #{issue_number}: {issue['title']}",
-            head_branch,
-            default_branch,
-            f"Closes #{issue_number}\n\n{issue['body']}"
-        )
-        pr_number = pr['number']
-        logger.info(f"Created PR #{pr_number} for issue {issue_number}")
-    except Exception as e:
-        logger.error(f"Failed to create PR for issue {issue_number}: {e}")
-        sys.exit(1)
 
-    logger.info(f"Subagent completed work for issue {issue_number}, PR #{pr_number} created")
+    if changes_made:
+        try:
+            logger.debug(f"Creating PR with head={head_branch}")
+            # Get the default branch for the repository
+            repo_info = client.get_repo(owner, repo_name)
+            default_branch = repo_info.get('default_branch', 'main')
+            logger.info(f"Using default branch: {default_branch}")
+            pr = client.create_pull_request(
+                owner, repo_name,
+                f"Fix issue #{issue_number}: {issue['title']}",
+                head_branch,
+                default_branch,
+                f"Closes #{issue_number}\n\n{issue['body']}"
+            )
+            pr_number = pr['number']
+            logger.info(f"Created PR #{pr_number} for issue {issue_number}")
+            logger.info(f"Subagent completed work for issue {issue_number}, PR #{pr_number} created")
+        except Exception as e:
+            logger.error(f"Failed to create PR for issue {issue_number}: {e}")
+            sys.exit(1)
+    else:
+        logger.info(f"Subagent completed work for issue {issue_number}, no changes made, no PR created")
 
 if __name__ == '__main__':
     main()

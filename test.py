@@ -8,9 +8,11 @@ def main():
     """Run the test suite."""
     print("Running kilo-agent tests...")
 
-    # Run unittest
-    result = subprocess.run([sys.executable, '-m', 'unittest', 'test_integration.py', '-v'],
-                          capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, '-m', 'unittest', 'discover', '-v'],
+        capture_output=True,
+        text=True
+    )
 
     print(result.stdout)
     if result.stderr:

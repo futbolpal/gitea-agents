@@ -6,7 +6,7 @@ from requests.exceptions import RequestException, Timeout, ConnectionError
 logger = logging.getLogger(__name__)
 
 class GiteaClient:
-    def __init__(self, base_url, token, max_retries=3, backoff_factor=2):
+    def __init__(self, base_url, token, max_retries=3, backoff_factor=2, timeout=30):
         self.base_url = base_url.rstrip('/')
         self.session = requests.Session()
         self.session.headers.update({
@@ -15,16 +15,24 @@ class GiteaClient:
         })
         self.max_retries = max_retries
         self.backoff_factor = backoff_factor
+        self.timeout = timeout
 
     def _make_request(self, method, url, **kwargs):
         """Make HTTP request with retry logic and error handling."""
+        if 'timeout' not in kwargs:
+            kwargs['timeout'] = self.timeout
         for attempt in range(self.max_retries + 1):
             try:
                 logger.debug(f"Making {method} request to {url} (attempt {attempt + 1})")
                 response = self.session.request(method, url, **kwargs)
                 response.raise_for_status()
                 logger.debug(f"Request successful: {method} {url}")
-                return response.json()
+                if not response.content:
+                    return None
+                try:
+                    return response.json()
+                except ValueError:
+                    return response.text
             except requests.exceptions.HTTPError as e:
                 if response.status_code >= 500:
                     # Server error, retry

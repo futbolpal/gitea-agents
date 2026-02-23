@@ -6,6 +6,7 @@ import os
 import atexit
 import json
 import psutil
+import sys
 from config import Config
 from gitea_client import GiteaClient
 
@@ -27,6 +28,48 @@ def is_comment_completed(client, owner, repo_name, comment_id, logger):
     except Exception as e:
         logger.warning(f"Could not check if comment {comment_id} is completed: {e}")
         return False
+
+def is_subagent_pid(pid, logger):
+    try:
+        process = psutil.Process(pid)
+        cmdline = process.cmdline()
+        return any('subagent.py' in part for part in cmdline)
+    except Exception as e:
+        logger.debug(f"Could not inspect pid {pid}: {e}")
+        return False
+
+def prune_stale_processes(active_subprocesses, logger):
+    stale_pids = []
+    for pid, info in active_subprocesses.items():
+        proc = info.get('proc')
+        if proc is not None:
+            continue
+        if not psutil.pid_exists(pid):
+            stale_pids.append(pid)
+            continue
+        if not is_subagent_pid(pid, logger):
+            stale_pids.append(pid)
+    for pid in stale_pids:
+        logger.warning(f"Removing stale subprocess entry for pid {pid}")
+        del active_subprocesses[pid]
+
+def collect_finished_pids(active_subprocesses, logger):
+    finished = []
+    for pid, info in active_subprocesses.items():
+        proc = info.get('proc')
+        if proc is None:
+            if not psutil.pid_exists(pid):
+                finished.append(pid)
+            continue
+        try:
+            if proc.poll() is not None:
+                finished.append(pid)
+        except Exception as e:
+            logger.warning(f"Could not poll subprocess {pid}: {e}")
+    return finished
+
+def spawn_subagent(args):
+    return subprocess.Popen([sys.executable, 'subagent.py'] + args)
 
 def main():
     os.environ['PROCESS_TYPE'] = 'main'
@@ -114,6 +157,7 @@ def main():
     except Exception as e:
         logger.warning(f"Could not load persisted state: {e}")
         active_subprocesses = {}
+    prune_stale_processes(active_subprocesses, logger)
 
     def save_state():
         """Persist current state to disk."""
@@ -140,6 +184,19 @@ def main():
         logger.info("Cleaning up active subprocesses...")
         for pid, proc_info in active_subprocesses.items():
             proc = proc_info['proc']
+            if proc is None:
+                if psutil.pid_exists(pid) and is_subagent_pid(pid, logger):
+                    try:
+                        process = psutil.Process(pid)
+                        process.terminate()
+                        process.wait(timeout=5)
+                        logger.info(f"Terminated subprocess {pid} for {proc_info['work_item']} {proc_info['id']}")
+                    except psutil.TimeoutExpired:
+                        process.kill()
+                        logger.warning(f"Force killed subprocess {pid}")
+                    except Exception as e:
+                        logger.error(f"Error terminating subprocess {pid}: {e}")
+                continue
             if proc.poll() is None:  # Still running
                 try:
                     proc.terminate()
@@ -163,6 +220,7 @@ def main():
 
     while running:
         logger.info("Starting polling cycle")
+        prune_stale_processes(active_subprocesses, logger)
         for repo in config.gitea_repos:
             owner, repo_name = repo.split('/', 1)
             try:
@@ -193,7 +251,7 @@ def main():
 
                         # Spawn subagent
                         try:
-                            proc = subprocess.Popen(['python', 'subagent.py', '--issue', str(issue['number']), repo])
+                            proc = spawn_subagent(['--issue', str(issue['number']), repo])
                             active_subprocesses[proc.pid] = {
                                 'proc': proc,
                                 'work_item': 'issue',
@@ -280,9 +338,9 @@ def main():
                             try:
                                 if work_item == 'review_comment':
                                     review_id = comment.get('pull_request_review_id')
-                                    proc = subprocess.Popen(['python', 'subagent.py', '--comment', str(comment['id']), repo, str(pr_number), work_item, str(review_id)])
+                                    proc = spawn_subagent(['--comment', str(comment['id']), repo, str(pr_number), work_item, str(review_id)])
                                 else:
-                                    proc = subprocess.Popen(['python', 'subagent.py', '--comment', str(comment['id']), repo, str(pr_number), work_item])
+                                    proc = spawn_subagent(['--comment', str(comment['id']), repo, str(pr_number), work_item])
                                 active_subprocesses[proc.pid] = {
                                     'proc': proc,
                                     'work_item': work_item,
@@ -302,11 +360,21 @@ def main():
                 logger.error(f"Error querying PRs for repo {repo}: {e}")
 
         # Clean up finished subprocesses
-        finished_pids = [pid for pid, info in active_subprocesses.items() if info['proc'].poll() is not None]
+        finished_pids = collect_finished_pids(active_subprocesses, logger)
         for pid in finished_pids:
             proc_info = active_subprocesses[pid]
-            returncode = proc_info['proc'].returncode
+            proc = proc_info.get('proc')
+            returncode = proc.returncode if proc is not None else None
             logger.info(f"Subprocess {pid} for {proc_info['work_item']} {proc_info['id']} finished with returncode {returncode}")
+            if returncode is None:
+                owner, repo_name = proc_info['repo'].split('/', 1)
+                if proc_info['work_item'] == 'issue':
+                    if is_issue_completed(client, owner, repo_name, proc_info['id'], config, logger):
+                        returncode = 0
+                else:
+                    if is_comment_completed(client, owner, repo_name, proc_info['id'], logger):
+                        returncode = 0
+
             if returncode == 0:
                 if proc_info['work_item'] == 'issue':
                     # Update issue labels: add in_review (keep reserve)
@@ -338,14 +406,14 @@ def main():
                     logger.info(f"Retrying {proc_info['work_item']} {proc_info['id']} (attempt {proc_info['retry_count']})")
                     try:
                         if proc_info['work_item'] == 'issue':
-                            proc = subprocess.Popen(['python', 'subagent.py', '--issue', str(proc_info['id']), proc_info['repo']])
+                            proc = spawn_subagent(['--issue', str(proc_info['id']), proc_info['repo']])
                         else:
                             pr_number = proc_info['pr_number']
                             if proc_info['work_item'] == 'review_comment':
                                 review_id = proc_info['review_id']
-                                proc = subprocess.Popen(['python', 'subagent.py', '--comment', str(proc_info['id']), proc_info['repo'], str(pr_number), proc_info['work_item'], str(review_id)])
+                                proc = spawn_subagent(['--comment', str(proc_info['id']), proc_info['repo'], str(pr_number), proc_info['work_item'], str(review_id)])
                             else:
-                                proc = subprocess.Popen(['python', 'subagent.py', '--comment', str(proc_info['id']), proc_info['repo'], str(pr_number), proc_info['work_item']])
+                                proc = spawn_subagent(['--comment', str(proc_info['id']), proc_info['repo'], str(pr_number), proc_info['work_item']])
                         proc_info['proc'] = proc
                         # Keep the same pid key? No, new pid.
                         active_subprocesses[proc.pid] = proc_info

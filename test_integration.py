@@ -3,12 +3,14 @@ from unittest.mock import patch, MagicMock, mock_open
 import os
 import sys
 import tempfile
+import shutil
 import json
 import subprocess
 
 class TestIntegration(unittest.TestCase):
     def setUp(self):
         # Set mock environment variables
+        self.temp_dir = tempfile.mkdtemp()
         self.mock_env = {
             'GITEA_BASE_URL': 'http://mock.gitea.com',
             'GITEA_TOKEN': 'mock_token',
@@ -19,7 +21,9 @@ class TestIntegration(unittest.TestCase):
             'LOG_LEVEL': 'INFO',
             'LOG_FILE': 'test.log',
             'MAX_LOG_SIZE': '10485760',
-            'LOG_BACKUP_COUNT': '5'
+            'LOG_BACKUP_COUNT': '5',
+            'DATA_DIR': self.temp_dir,
+            'AGENT_CLI': 'kilocode'
         }
         for key, value in self.mock_env.items():
             os.environ[key] = value
@@ -29,6 +33,10 @@ class TestIntegration(unittest.TestCase):
         for key in self.mock_env:
             if key in os.environ:
                 del os.environ[key]
+        try:
+            shutil.rmtree(self.temp_dir)
+        except Exception:
+            pass
 
     def test_config_loading_and_validation(self):
         """Test that configuration loads correctly and validates."""
@@ -64,6 +72,7 @@ class TestIntegration(unittest.TestCase):
             mock_config = MagicMock()
             mock_config.gitea_repos = ['owner/*', 'other/regular']
             mock_config.polling_frequency = 1
+            mock_config.data_dir = self.temp_dir
             mock_config_class.return_value = mock_config
 
             with patch('main.logging') as mock_logging:
@@ -148,6 +157,7 @@ class TestIntegration(unittest.TestCase):
             mock_config.issue_label_in_review = 'agent-in-review'
             mock_config.polling_frequency = 1
             mock_config.max_concurrent_subagents = 10
+            mock_config.data_dir = self.temp_dir
             mock_config_class.return_value = mock_config
 
             # Mock logging
@@ -168,7 +178,7 @@ class TestIntegration(unittest.TestCase):
         # Should reserve the issue (cleanup not run in test)
         mock_client.update_issue_labels.assert_called_with('owner', 'repo', 1, ['agent-working'])
         # Should spawn subagent
-        mock_popen.assert_called_with(['python', 'subagent.py', '--issue', '1', 'owner/repo'])
+        mock_popen.assert_called_with([sys.executable, 'subagent.py', '--issue', '1', 'owner/repo'])
 
     @patch('subprocess.Popen')
     @patch('main.time.sleep')
@@ -205,6 +215,7 @@ class TestIntegration(unittest.TestCase):
             mock_config.gitea_repos = ['owner/repo']
             mock_config.polling_frequency = 1
             mock_config.max_concurrent_subagents = 10
+            mock_config.data_dir = self.temp_dir
             mock_config_class.return_value = mock_config
 
             with patch('main.logging') as mock_logging:
@@ -225,7 +236,7 @@ class TestIntegration(unittest.TestCase):
             call('owner', 'repo', 100, 'heart')
         ])
         # Should spawn subagent
-        mock_popen.assert_called_with(['python', 'subagent.py', '--comment', '100', 'owner/repo', '1', 'pr_comment'])
+        mock_popen.assert_called_with([sys.executable, 'subagent.py', '--comment', '100', 'owner/repo', '1', 'pr_comment'])
 
     @patch('subprocess.Popen')
     @patch('main.time.sleep')
@@ -263,6 +274,7 @@ class TestIntegration(unittest.TestCase):
             mock_config.gitea_repos = ['owner/repo']
             mock_config.polling_frequency = 1
             mock_config.max_concurrent_subagents = 10
+            mock_config.data_dir = self.temp_dir
             mock_config_class.return_value = mock_config
 
             with patch('main.logging') as mock_logging:
@@ -283,7 +295,7 @@ class TestIntegration(unittest.TestCase):
             call('owner', 'repo', 101, 'heart')
         ])
         # Should spawn subagent with review_id
-        mock_popen.assert_called_with(['python', 'subagent.py', '--comment', '101', 'owner/repo', '1', 'review_comment', '200'])
+        mock_popen.assert_called_with([sys.executable, 'subagent.py', '--comment', '101', 'owner/repo', '1', 'review_comment', '200'])
 
     @patch('subprocess.Popen')
     @patch('main.time.sleep')
@@ -325,6 +337,7 @@ class TestIntegration(unittest.TestCase):
             mock_config.gitea_repos = ['owner/repo']
             mock_config.polling_frequency = 1
             mock_config.max_concurrent_subagents = 10
+            mock_config.data_dir = self.temp_dir
             mock_config_class.return_value = mock_config
 
             with patch('main.logging') as mock_logging:

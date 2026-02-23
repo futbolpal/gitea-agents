@@ -9,10 +9,10 @@ RUN groupadd -r kilocode && \
     chown -R kilocode:kilocode /home/kilocode /workspace /data
 
 
-# Install kilocode CLI and git
 RUN apt-get update && apt-get install -y curl git nodejs npm && \
-    npm install -g @kilocode/cli && \
+    npm install -g @kilocode/cli @openai/codex && \
     which kilocode || (echo "kilocode not found in PATH" && exit 1) && \
+    which codex || (echo "codex not found in PATH" && exit 1) && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 #ENV PATH=$PATH:/root/bin
 

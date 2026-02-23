@@ -7,7 +7,7 @@ When the kilo-agent sees an unreserved issue
 Then the kilo-agent reserves the issue
 And the kilo-agent spawns a subprocess to handle the work
 Then the subprocess creates a new PR
-Then the kilo-agent adds a label 'agent-acceptance' indicating the work is complete.
+Then the kilo-agent adds a label 'agent-in-review' indicating the work is complete.
 
 ## Scenario: Handling PR comment creation
 
