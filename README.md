@@ -115,6 +115,31 @@ Set the following environment variables:
 
 To use Codex CLI for code generation, set `AGENT_CLI=codex`.
 
+## Codex on a Headless Server
+
+Codex CLI can authenticate either via browser login (`codex --login`) or by using an API key. For headless servers, use the API key flow.
+
+1. Install the CLI:
+   ```bash
+   npm install -g @openai/codex
+   ```
+
+2. Export an API key in the environment (recommended):
+   ```bash
+   export OPENAI_API_KEY="<OAI_KEY>"
+   ```
+
+3. Verify the CLI is available:
+   ```bash
+   codex --version
+   ```
+
+4. Run this agent with Codex:
+   ```bash
+   export AGENT_CLI=codex
+   python main.py
+   ```
+
 ## Testing
 
 Run the integration test to verify API connectivity and basic functionality:
