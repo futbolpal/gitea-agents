@@ -86,7 +86,9 @@ class Config:
             os.makedirs(self.data_dir, exist_ok=True)
         except Exception as e:
             raise ValueError(f"Failed to create DATA_DIR '{self.data_dir}': {e}")
-        try:
-            os.makedirs(self.workspace_dir, exist_ok=True)
-        except Exception as e:
-            raise ValueError(f"Failed to create WORKSPACE_DIR '{self.workspace_dir}': {e}")
+        if self.workspace_dir:
+            try:
+                os.makedirs(self.workspace_dir, exist_ok=True)
+            except Exception:
+                # Defer to runtime fallback if workspace isn't writable.
+                pass

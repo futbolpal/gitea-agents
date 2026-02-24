@@ -125,6 +125,15 @@ def _build_context(repo_dir, config, issue=None, pr=None, comment=None):
         context = context[:max_chars].rstrip()
     return context
 
+def _make_repo_temp_dir(config, logger):
+    preferred_dir = config.workspace_dir
+    if preferred_dir:
+        try:
+            return tempfile.mkdtemp(dir=preferred_dir)
+        except Exception as exc:
+            logger.warning("Failed to create temp repo in %s: %s", preferred_dir, exc)
+    return tempfile.mkdtemp()
+
 def _load_prompt_template(config):
     default_template = (
         "Do not create any new issues or pull requests. Only make code changes as requested.\n"
@@ -285,7 +294,7 @@ def main():
             sys.exit(1)
 
         # Clone the repository
-        repo_temp_dir = tempfile.mkdtemp(dir=config.workspace_dir)
+        repo_temp_dir = _make_repo_temp_dir(config, logger)
         logger.info(f"Cloning repo {owner}/{repo_name} to {repo_temp_dir}")
         try:
             # Construct clone URL with token
@@ -366,7 +375,7 @@ def main():
         sys.exit(1)
 
     # Clone the repository
-    repo_temp_dir = tempfile.mkdtemp(dir=config.workspace_dir)
+    repo_temp_dir = _make_repo_temp_dir(config, logger)
     logger.info(f"Cloning repo {owner}/{repo_name} to {repo_temp_dir}")
     try:
         # Construct clone URL with token, preserving protocol
