@@ -70,6 +70,7 @@ Set the following environment variables:
 - `CODEX_PROMPT_MODE`: How to pass prompts to codex (`stdin` or `arg`, default: `stdin`)
 - `CODEX_MODEL`: Optional codex model name (passed as `-m`)
 - `PROMPT_TEMPLATE_PATH`: Path to the prompt template file (default: `prompt_template.txt`)
+- `MAX_CONTEXT_CHARS`: Max characters of repo context injected into prompts (default: `8000`)
 
 ## Running
 

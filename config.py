@@ -37,6 +37,7 @@ class Config:
         self.codex_prompt_mode = os.getenv('CODEX_PROMPT_MODE', 'stdin').strip().lower()
         self.codex_model = os.getenv('CODEX_MODEL')
         self.prompt_template_path = os.getenv('PROMPT_TEMPLATE_PATH', 'prompt_template.txt')
+        self.max_context_chars = int(os.getenv('MAX_CONTEXT_CHARS', '8000'))
 
     def setup_logging(self):
         """Setup logging configuration with console and file handlers."""

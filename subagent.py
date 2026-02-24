@@ -17,6 +17,114 @@ def _strip_api_suffix(base_url):
         return base_url[:-7]
     return base_url
 
+def _safe_run(cmd, cwd):
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=cwd,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        output = result.stdout.strip()
+        if output:
+            return output
+    except Exception:
+        return ""
+    return ""
+
+def _read_first_existing(repo_dir, filenames, max_chars):
+    for name in filenames:
+        path = os.path.join(repo_dir, name)
+        if os.path.isfile(path):
+            try:
+                with open(path, 'r', encoding='utf-8', errors='replace') as handle:
+                    return handle.read(max_chars).strip()
+            except Exception:
+                continue
+    return ""
+
+def _detect_stack(repo_dir):
+    markers = {
+        "python": ["pyproject.toml", "requirements.txt", "setup.py"],
+        "node": ["package.json", "pnpm-lock.yaml", "yarn.lock"],
+        "go": ["go.mod"],
+        "rust": ["Cargo.toml"],
+        "ruby": ["Gemfile"],
+        "java": ["pom.xml", "build.gradle", "build.gradle.kts"],
+        "dotnet": ["*.csproj", "*.fsproj"],
+        "php": ["composer.json"],
+    }
+    detected = []
+    for label, files in markers.items():
+        for pattern in files:
+            if "*" in pattern:
+                matches = [f for f in os.listdir(repo_dir) if f.endswith(pattern.split("*")[-1])]
+                if matches:
+                    detected.append(label)
+                    break
+            else:
+                if os.path.exists(os.path.join(repo_dir, pattern)):
+                    detected.append(label)
+                    break
+    return detected
+
+def _build_context(repo_dir, config, issue=None, pr=None, comment=None):
+    max_chars = config.max_context_chars
+    parts = []
+
+    parts.append("Context:")
+    tech = _detect_stack(repo_dir)
+    if tech:
+        parts.append(f"- tech: {', '.join(sorted(set(tech)))}")
+
+    readme = _read_first_existing(
+        repo_dir,
+        ["README.md", "README.txt", "README.rst"],
+        max_chars // 4
+    )
+    if readme:
+        parts.append("- readme_excerpt:")
+        parts.append(readme)
+
+    git_status = _safe_run(["git", "status", "--short"], repo_dir)
+    if git_status:
+        parts.append("- git_status:")
+        parts.append(git_status)
+
+    git_last = _safe_run(["git", "log", "-1", "--oneline"], repo_dir)
+    if git_last:
+        parts.append(f"- last_commit: {git_last}")
+
+    if issue:
+        parts.append(f"- issue: #{issue.get('number')} {issue.get('title', '').strip()}")
+        labels = [l.get('name') for l in issue.get('labels', []) if l.get('name')]
+        if labels:
+            parts.append(f"- issue_labels: {', '.join(labels)}")
+
+    if pr:
+        parts.append(f"- pr: #{pr.get('number')} {pr.get('title', '').strip()}")
+        head = pr.get('head', {}).get('ref')
+        base = pr.get('base', {}).get('ref')
+        if head or base:
+            parts.append(f"- pr_branches: {head} -> {base}")
+
+    if comment:
+        parts.append(f"- comment_type: {comment.get('type')}")
+        if comment.get('path'):
+            parts.append(f"- comment_path: {comment.get('path')}")
+        if comment.get('position'):
+            parts.append(f"- comment_line: {comment.get('position')}")
+        if comment.get('diff_hunk'):
+            parts.append("- comment_diff:")
+            parts.append(comment.get('diff_hunk'))
+
+    context = "\n".join(parts).strip()
+    if len(context) > max_chars:
+        context = context[:max_chars].rstrip()
+    return context
+
 def _load_prompt_template(config):
     default_template = (
         "Do not create any new issues or pull requests. Only make code changes as requested.\n"
@@ -204,7 +312,15 @@ def main():
         # Perform work
         try:
             prompt = f"Address this feedback{context}: {body}"
-            do_work(prompt, repo_temp_dir, config, head_branch)
+            comment_context = {
+                'type': comment_type,
+                'path': comment.get('path') if isinstance(comment, dict) else None,
+                'position': comment.get('position') if isinstance(comment, dict) else None,
+                'diff_hunk': comment.get('diff_hunk') if isinstance(comment, dict) else None,
+            }
+            context_block = _build_context(repo_temp_dir, config, pr=pr, comment=comment_context)
+            combined_prompt = f"{context_block}\n\n{prompt}" if context_block else prompt
+            do_work(combined_prompt, repo_temp_dir, config, head_branch)
         except Exception as e:
             logger.error(f"Work failed: {e}")
             shutil.rmtree(repo_temp_dir)
@@ -276,7 +392,9 @@ def main():
         sys.exit(1)
 
     try:
-        do_work(issue['body'], repo_temp_dir, config, head_branch)
+        context_block = _build_context(repo_temp_dir, config, issue=issue)
+        combined_prompt = f"{context_block}\n\n{issue['body']}" if context_block else issue['body']
+        do_work(combined_prompt, repo_temp_dir, config, head_branch)
     except Exception as e:
         logger.error(f"Work failed: {e}")
         shutil.rmtree(repo_temp_dir)
