@@ -47,7 +47,7 @@ def run_kilocode(prompt, repo_dir, config):
 
 def run_codex(prompt, repo_dir, config):
     _ensure_cli_available("codex")
-    cmd = ["codex", "exec"] + config.codex_exec_args
+    cmd = ["codex", "exec", "-C", repo_dir] + config.codex_exec_args
     if config.codex_model:
         cmd += ["-m", config.codex_model]
     if config.codex_prompt_mode == "stdin":

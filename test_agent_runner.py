@@ -33,7 +33,9 @@ class TestAgentRunner(unittest.TestCase):
 
         args, kwargs = mock_run.call_args
         self.assertIn('codex', args[0][0])
-        self.assertEqual(args[0][:3], ['codex', 'exec', '--full-auto'])
+        self.assertEqual(args[0][:3], ['codex', 'exec', '-C'])
+        self.assertEqual(args[0][3], self.temp_dir)
+        self.assertEqual(args[0][4], '--full-auto')
         self.assertEqual(args[0][-1], '-')
         self.assertEqual(kwargs['input'], prompt)
 
