@@ -38,6 +38,7 @@ class Config:
         self.codex_model = os.getenv('CODEX_MODEL')
         self.prompt_template_path = os.getenv('PROMPT_TEMPLATE_PATH', 'prompt_template.txt')
         self.max_context_chars = int(os.getenv('MAX_CONTEXT_CHARS', '8000'))
+        self.workspace_dir = os.getenv('WORKSPACE_DIR', '/workspace')
 
     def setup_logging(self):
         """Setup logging configuration with console and file handlers."""
@@ -85,3 +86,7 @@ class Config:
             os.makedirs(self.data_dir, exist_ok=True)
         except Exception as e:
             raise ValueError(f"Failed to create DATA_DIR '{self.data_dir}': {e}")
+        try:
+            os.makedirs(self.workspace_dir, exist_ok=True)
+        except Exception as e:
+            raise ValueError(f"Failed to create WORKSPACE_DIR '{self.workspace_dir}': {e}")

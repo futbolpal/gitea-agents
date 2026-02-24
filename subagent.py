@@ -285,7 +285,7 @@ def main():
             sys.exit(1)
 
         # Clone the repository
-        repo_temp_dir = tempfile.mkdtemp()
+        repo_temp_dir = tempfile.mkdtemp(dir=config.workspace_dir)
         logger.info(f"Cloning repo {owner}/{repo_name} to {repo_temp_dir}")
         try:
             # Construct clone URL with token
@@ -366,7 +366,7 @@ def main():
         sys.exit(1)
 
     # Clone the repository
-    repo_temp_dir = tempfile.mkdtemp()
+    repo_temp_dir = tempfile.mkdtemp(dir=config.workspace_dir)
     logger.info(f"Cloning repo {owner}/{repo_name} to {repo_temp_dir}")
     try:
         # Construct clone URL with token, preserving protocol

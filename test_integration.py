@@ -23,6 +23,7 @@ class TestIntegration(unittest.TestCase):
             'MAX_LOG_SIZE': '10485760',
             'LOG_BACKUP_COUNT': '5',
             'DATA_DIR': self.temp_dir,
+            'WORKSPACE_DIR': self.temp_dir,
             'AGENT_CLI': 'kilocode'
         }
         for key, value in self.mock_env.items():
@@ -73,6 +74,7 @@ class TestIntegration(unittest.TestCase):
             mock_config.gitea_repos = ['owner/*', 'other/regular']
             mock_config.polling_frequency = 1
             mock_config.data_dir = self.temp_dir
+            mock_config.workspace_dir = self.temp_dir
             mock_config_class.return_value = mock_config
 
             with patch('main.logging') as mock_logging:
@@ -158,6 +160,7 @@ class TestIntegration(unittest.TestCase):
             mock_config.polling_frequency = 1
             mock_config.max_concurrent_subagents = 10
             mock_config.data_dir = self.temp_dir
+            mock_config.workspace_dir = self.temp_dir
             mock_config_class.return_value = mock_config
 
             # Mock logging
@@ -216,6 +219,7 @@ class TestIntegration(unittest.TestCase):
             mock_config.polling_frequency = 1
             mock_config.max_concurrent_subagents = 10
             mock_config.data_dir = self.temp_dir
+            mock_config.workspace_dir = self.temp_dir
             mock_config_class.return_value = mock_config
 
             with patch('main.logging') as mock_logging:
@@ -275,6 +279,7 @@ class TestIntegration(unittest.TestCase):
             mock_config.polling_frequency = 1
             mock_config.max_concurrent_subagents = 10
             mock_config.data_dir = self.temp_dir
+            mock_config.workspace_dir = self.temp_dir
             mock_config_class.return_value = mock_config
 
             with patch('main.logging') as mock_logging:
@@ -338,6 +343,7 @@ class TestIntegration(unittest.TestCase):
             mock_config.polling_frequency = 1
             mock_config.max_concurrent_subagents = 10
             mock_config.data_dir = self.temp_dir
+            mock_config.workspace_dir = self.temp_dir
             mock_config_class.return_value = mock_config
 
             with patch('main.logging') as mock_logging:
