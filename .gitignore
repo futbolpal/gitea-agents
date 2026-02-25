@@ -3,3 +3,10 @@ kilocode_agent.log
 orchestration_state.json
 /data/*
 *.egg-info
+
+.codex/
+.kilocode/
+workspace/
+tmp/
+*.log
+*.log.*

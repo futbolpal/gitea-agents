@@ -20,6 +20,7 @@ class Config:
             if not self.gitea_base_url.endswith('/api/v1'):
                 self.gitea_base_url += '/api/v1'
         self.gitea_token = os.getenv('GITEA_TOKEN')
+        self.gitea_username = os.getenv('GITEA_USERNAME', 'oauth2')
         self.gitea_repos = [repo.strip() for repo in os.getenv('GITEA_REPOS', '').split(',') if repo.strip()]
         self.polling_frequency = int(os.getenv('POLLING_FREQUENCY', '60'))
         self.issue_label_reserve = os.getenv('ISSUE_LABEL_RESERVE', 'agent-working')
@@ -39,6 +40,8 @@ class Config:
         self.prompt_template_path = os.getenv('PROMPT_TEMPLATE_PATH', 'prompt_template.txt')
         self.max_context_chars = int(os.getenv('MAX_CONTEXT_CHARS', '8000'))
         self.workspace_dir = os.getenv('WORKSPACE_DIR', '/workspace')
+        self.git_user_name = os.getenv('GIT_USER_NAME', 'kilo-agent')
+        self.git_user_email = os.getenv('GIT_USER_EMAIL', 'kilo-agent@localhost')
 
     def setup_logging(self):
         """Setup logging configuration with console and file handlers."""
@@ -70,6 +73,42 @@ class Config:
 
         logger._kilo_configured = True
         return logger
+
+    def log_config(self, logger):
+        """Log configuration with sensitive values redacted."""
+        def _redact(value):
+            if not value:
+                return value
+            if len(value) <= 4:
+                return "****"
+            return value[:2] + "****" + value[-2:]
+
+        config_view = {
+            "gitea_base_url": self.gitea_base_url,
+            "gitea_token": _redact(self.gitea_token),
+            "gitea_username": self.gitea_username,
+            "gitea_repos": self.gitea_repos,
+            "polling_frequency": self.polling_frequency,
+            "issue_label_reserve": self.issue_label_reserve,
+            "issue_label_in_review": self.issue_label_in_review,
+            "max_concurrent_subagents": self.max_concurrent_subagents,
+            "data_dir": self.data_dir,
+            "workspace_dir": self.workspace_dir,
+            "log_level": self.log_level,
+            "log_file": self.log_file,
+            "max_log_size": self.max_log_size,
+            "backup_count": self.backup_count,
+            "agent_cli": self.agent_cli,
+            "kilocode_args": self.kilocode_args,
+            "codex_exec_args": self.codex_exec_args,
+            "codex_prompt_mode": self.codex_prompt_mode,
+            "codex_model": self.codex_model,
+            "prompt_template_path": self.prompt_template_path,
+            "max_context_chars": self.max_context_chars,
+            "git_user_name": self.git_user_name,
+            "git_user_email": self.git_user_email,
+        }
+        logger.info("Configuration: %s", config_view)
 
     def validate(self):
         if not self.gitea_base_url:

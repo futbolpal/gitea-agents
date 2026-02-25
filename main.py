@@ -77,6 +77,7 @@ def main():
     config.validate()
     logger = config.setup_logging()
     logger.info("Starting Kilocode Agent")
+    config.log_config(logger)
 
     client = GiteaClient(config.gitea_base_url, config.gitea_token)
 

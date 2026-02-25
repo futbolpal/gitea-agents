@@ -1,0 +1,10 @@
+.codex/
+.kilocode/
+.git/
+.gitignore
+.env
+workspace/
+data/
+tmp/
+*.log
+*.log.*

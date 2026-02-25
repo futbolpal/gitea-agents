@@ -134,6 +134,83 @@ def _make_repo_temp_dir(config, logger):
             logger.warning("Failed to create temp repo in %s: %s", preferred_dir, exc)
     return tempfile.mkdtemp()
 
+def _ensure_git_identity(repo_dir, config, logger):
+    def _get_config(key):
+        try:
+            result = subprocess.run(
+                ["git", "config", "--get", key],
+                cwd=repo_dir,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            return result.stdout.strip()
+        except Exception:
+            return ""
+
+    name = _get_config("user.name")
+    email = _get_config("user.email")
+
+    if not name:
+        subprocess.run(["git", "config", "user.name", config.git_user_name], cwd=repo_dir, check=False)
+        logger.info("Configured git user.name")
+    if not email:
+        subprocess.run(["git", "config", "user.email", config.git_user_email], cwd=repo_dir, check=False)
+        logger.info("Configured git user.email")
+
+def _get_git_head(repo_dir):
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_dir,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        return result.stdout.strip() if result.returncode == 0 else ""
+    except Exception:
+        return ""
+
+def _push_branch(repo_dir, branch, logger):
+    def _run_push(args):
+        return subprocess.run(
+            args,
+            cwd=repo_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+    result = _run_push(['git', 'push', 'origin', branch])
+    if result.returncode == 0:
+        return
+
+    message = (result.stderr or result.stdout).strip()
+    logger.error("Git push failed: %s", message)
+    if any(key in message for key in ("non-fast-forward", "fetch first", "rejected")):
+        logger.warning("Retrying push with --force-with-lease")
+        retry = _run_push(['git', 'push', '--force-with-lease', 'origin', branch])
+        if retry.returncode == 0:
+            logger.info("Force push with lease succeeded")
+            return
+        retry_message = (retry.stderr or retry.stdout).strip()
+        logger.error("Git push retry failed: %s", retry_message)
+        raise subprocess.CalledProcessError(
+            retry.returncode,
+            retry.args,
+            output=retry.stdout,
+            stderr=retry.stderr,
+        )
+
+    raise subprocess.CalledProcessError(
+        result.returncode,
+        result.args,
+        output=result.stdout,
+        stderr=result.stderr,
+    )
+
 def _load_prompt_template(config):
     default_template = (
         "Do not create any new issues or pull requests. Only make code changes as requested.\n"
@@ -222,6 +299,7 @@ def main():
     config = Config()
     config.validate()
     logger = config.setup_logging()
+    config.log_config(logger)
     if issue_number:
         logger.info(f"Starting subagent for issue {issue_number} in repo {repo}")
     else:
@@ -301,7 +379,7 @@ def main():
             base_url = _strip_api_suffix(config.gitea_base_url)
             protocol = 'https' if base_url.startswith('https://') else 'http'
             host = base_url.replace('https://', '').replace('http://', '')
-            clone_url = f"{protocol}://oauth2:{config.gitea_token}@{host}/{owner}/{repo_name}.git"
+            clone_url = f"{protocol}://{config.gitea_username}:{config.gitea_token}@{host}/{owner}/{repo_name}.git"
             subprocess.run(["git", "clone", clone_url, repo_temp_dir], check=True)
             logger.info("Repository cloned successfully")
         except subprocess.CalledProcessError as e:
@@ -317,6 +395,8 @@ def main():
             logger.error(f"Failed to checkout branch {head_branch}: {e}")
             shutil.rmtree(repo_temp_dir)
             sys.exit(1)
+
+        head_before = _get_git_head(repo_temp_dir)
 
         # Perform work
         try:
@@ -337,6 +417,7 @@ def main():
 
         # Handle commits and pushing
         try:
+            _ensure_git_identity(repo_temp_dir, config, logger)
             logger.debug("Adding changes to git")
             subprocess.run(['git', 'add', '.'], cwd=repo_temp_dir, check=True)
 
@@ -346,11 +427,13 @@ def main():
                 subprocess.run(['git', 'commit', '-m', f'Address {comment_type} #{comment_id} on PR #{pr_number}'], cwd=repo_temp_dir, check=True)
                 logger.info(f"Committed changes for {comment_type} {comment_id}")
 
+            head_after = _get_git_head(repo_temp_dir)
+            if head_before and head_after and head_before != head_after:
                 logger.debug(f"Pushing branch {head_branch}")
-                subprocess.run(['git', 'push', 'origin', head_branch], cwd=repo_temp_dir, check=True)
+                _push_branch(repo_temp_dir, head_branch, logger)
                 logger.info(f"Pushed branch {head_branch} to remote")
             else:
-                logger.warning("No changes to commit")
+                logger.warning("No new commits to push")
         except subprocess.CalledProcessError as e:
             logger.error(f"Git operation failed: {e}")
             shutil.rmtree(repo_temp_dir)
@@ -382,7 +465,7 @@ def main():
         base_url = _strip_api_suffix(config.gitea_base_url)
         protocol = 'https' if base_url.startswith('https://') else 'http'
         host = base_url.replace('https://', '').replace('http://', '')
-        clone_url = f"{protocol}://oauth2:{config.gitea_token}@{host}/{owner}/{repo_name}.git"
+        clone_url = f"{protocol}://{config.gitea_username}:{config.gitea_token}@{host}/{owner}/{repo_name}.git"
         subprocess.run(["git", "clone", clone_url, repo_temp_dir], check=True)
         logger.info("Repository cloned successfully")
     except subprocess.CalledProcessError as e:
@@ -400,6 +483,8 @@ def main():
         shutil.rmtree(repo_temp_dir)
         sys.exit(1)
 
+    head_before = _get_git_head(repo_temp_dir)
+
     try:
         context_block = _build_context(repo_temp_dir, config, issue=issue)
         combined_prompt = f"{context_block}\n\n{issue['body']}" if context_block else issue['body']
@@ -412,6 +497,7 @@ def main():
     # Handle commits and pushing since kilo-code may not do it
     changes_made = False
     try:
+        _ensure_git_identity(repo_temp_dir, config, logger)
         logger.debug("Adding changes to git")
         # Add all changes
         subprocess.run(['git', 'add', '.'], cwd=repo_temp_dir, check=True)
@@ -425,13 +511,15 @@ def main():
             subprocess.run(['git', 'commit', '-m', f'Fix issue #{issue_number}: {issue["title"]}'], cwd=repo_temp_dir, check=True)
             logger.info(f"Committed changes for issue {issue_number}")
 
+        head_after = _get_git_head(repo_temp_dir)
+        if head_before and head_after and head_before != head_after:
             logger.debug(f"Pushing branch {head_branch}")
             # Push
-            subprocess.run(['git', 'push', 'origin', head_branch], cwd=repo_temp_dir, check=True)
+            _push_branch(repo_temp_dir, head_branch, logger)
             logger.info(f"Pushed branch {head_branch} to remote")
             changes_made = True
         else:
-            logger.warning("No changes to commit")
+            logger.warning("No new commits to push")
     except subprocess.CalledProcessError as e:
         logger.error(f"Git operation failed: {e}")
         shutil.rmtree(repo_temp_dir)
@@ -455,6 +543,19 @@ def main():
             logger.info(f"Created PR #{pr_number} for issue {issue_number}")
             logger.info(f"Subagent completed work for issue {issue_number}, PR #{pr_number} created")
         except Exception as e:
+            message = str(e)
+            if "pull request already exists" in message or "API Error 409" in message:
+                try:
+                    prs = client.get_pulls(owner, repo_name, state='open')
+                    match = next((pr for pr in prs if pr.get('head', {}).get('ref') == head_branch), None)
+                    if match:
+                        pr_number = match.get('number')
+                        logger.info(f"PR already exists for head {head_branch}: #{pr_number}")
+                        logger.info(f"Subagent completed work for issue {issue_number}, PR #{pr_number} already exists")
+                        sys.exit(0)
+                except Exception as fetch_error:
+                    logger.error(f"Failed to locate existing PR for {head_branch}: {fetch_error}")
+
             logger.error(f"Failed to create PR for issue {issue_number}: {e}")
             sys.exit(1)
     else:
