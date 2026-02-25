@@ -29,6 +29,15 @@ def is_comment_completed(client, owner, repo_name, comment_id, logger):
         logger.warning(f"Could not check if comment {comment_id} is completed: {e}")
         return False
 
+def is_comment_from_bot(comment, config):
+    if not isinstance(comment, dict):
+        return False
+    user = comment.get('user') or {}
+    username = user.get('username')
+    if not username or not config.gitea_bot_username:
+        return False
+    return username.lower() == config.gitea_bot_username.lower()
+
 def is_subagent_pid(pid, logger):
     try:
         process = psutil.Process(pid)
@@ -293,6 +302,9 @@ def main():
                         logger.info(f"Checking {len(all_comments)} comments/reviews on PR #{pr_number}")
 
                     for comment in all_comments:
+                        if is_comment_from_bot(comment, config):
+                            logger.debug(f"Skipping bot-authored comment {comment.get('id')}")
+                            continue
                         logger.info(f"Processing new comment/review {comment['id']} on PR #{pr_number}")
                         # Check reactions
                         try:

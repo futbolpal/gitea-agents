@@ -211,6 +211,64 @@ def _push_branch(repo_dir, branch, logger):
         stderr=result.stderr,
     )
 
+def _git_output(repo_dir, args):
+    result = subprocess.run(
+        args,
+        cwd=repo_dir,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return result
+
+def _branch_is_behind_base(repo_dir, base_ref):
+    fetch = _git_output(repo_dir, ['git', 'fetch', 'origin', base_ref])
+    if fetch.returncode != 0:
+        raise subprocess.CalledProcessError(fetch.returncode, fetch.args, output=fetch.stdout, stderr=fetch.stderr)
+    rev = _git_output(repo_dir, ['git', 'rev-list', '--left-right', '--count', f'HEAD...origin/{base_ref}'])
+    if rev.returncode != 0:
+        raise subprocess.CalledProcessError(rev.returncode, rev.args, output=rev.stdout, stderr=rev.stderr)
+    counts = rev.stdout.strip().split()
+    if len(counts) != 2:
+        return False
+    behind = int(counts[1])
+    return behind > 0
+
+def _merge_base_into_head(repo_dir, base_ref):
+    return _git_output(repo_dir, ['git', 'merge', f'origin/{base_ref}'])
+
+def _merge_conflicts(repo_dir):
+    result = _git_output(repo_dir, ['git', 'diff', '--name-only', '--diff-filter=U'])
+    if result.returncode != 0:
+        return []
+    return [line for line in result.stdout.splitlines() if line.strip()]
+
+def _merge_in_progress(repo_dir):
+    return os.path.exists(os.path.join(repo_dir, '.git', 'MERGE_HEAD'))
+
+def _finalize_merge(repo_dir, base_ref, head_branch, logger):
+    if not _merge_in_progress(repo_dir):
+        return
+    subprocess.run(['git', 'add', '.'], cwd=repo_dir, check=True)
+    subprocess.run(
+        ['git', 'commit', '-m', f'Merge {base_ref} into {head_branch}'],
+        cwd=repo_dir,
+        check=True,
+    )
+    logger.info("Committed merge of %s into %s", base_ref, head_branch)
+
+def _comment_merge_failure(client, owner, repo_name, pr_number, base_ref, conflicts, error):
+    conflict_list = "\n".join(f"- {path}" for path in conflicts) if conflicts else "- (unknown)"
+    body = (
+        "I attempted to update this branch with the latest changes from "
+        f"`{base_ref}`, but hit merge conflicts I could not resolve automatically.\n\n"
+        "Conflicting files:\n"
+        f"{conflict_list}\n\n"
+        "Please resolve these conflicts manually, then re-run the agent.\n\n"
+        f"Error details: {error}"
+    )
+    client.create_pull_comment(owner, repo_name, pr_number, body)
+
 def _load_prompt_template(config):
     default_template = (
         "Do not create any new issues or pull requests. Only make code changes as requested.\n"
@@ -395,6 +453,38 @@ def main():
             logger.error(f"Failed to checkout branch {head_branch}: {e}")
             shutil.rmtree(repo_temp_dir)
             sys.exit(1)
+
+        base_ref = pr.get('base', {}).get('ref')
+        if base_ref:
+            try:
+                if _branch_is_behind_base(repo_temp_dir, base_ref):
+                    logger.info("Branch %s is behind %s; attempting merge", head_branch, base_ref)
+                    merge_result = _merge_base_into_head(repo_temp_dir, base_ref)
+                    if merge_result.returncode != 0:
+                        conflicts = _merge_conflicts(repo_temp_dir)
+                        logger.warning("Merge conflicts detected: %s", ", ".join(conflicts) if conflicts else "unknown")
+                        merge_prompt = (
+                            f"Resolve merge conflicts after merging origin/{base_ref} into {head_branch}. "
+                            "Only resolve conflict markers; do not change unrelated code."
+                        )
+                        do_work(merge_prompt, repo_temp_dir, config, head_branch)
+                        conflicts = _merge_conflicts(repo_temp_dir)
+                        if conflicts:
+                            _comment_merge_failure(client, owner, repo_name, pr_number, base_ref, conflicts, "Merge conflicts remain")
+                            logger.error("Merge conflicts remain after attempted resolution")
+                            shutil.rmtree(repo_temp_dir)
+                            sys.exit(0)
+                        _finalize_merge(repo_temp_dir, base_ref, head_branch, logger)
+                    else:
+                        logger.info("Merge completed cleanly")
+            except Exception as e:
+                try:
+                    conflicts = _merge_conflicts(repo_temp_dir)
+                    _comment_merge_failure(client, owner, repo_name, pr_number, base_ref, conflicts, e)
+                except Exception as comment_error:
+                    logger.error("Failed to comment about merge failure: %s", comment_error)
+                shutil.rmtree(repo_temp_dir)
+                sys.exit(0)
 
         head_before = _get_git_head(repo_temp_dir)
 

@@ -24,6 +24,15 @@ class TestMainState(unittest.TestCase):
             main.prune_stale_processes(active, logger)
         self.assertIn(456, active)
 
+    def test_is_comment_from_bot(self):
+        config = MagicMock()
+        config.gitea_bot_username = "kilo-bot"
+        comment = {"id": 1, "user": {"username": "kilo-bot"}}
+        self.assertTrue(main.is_comment_from_bot(comment, config))
+
+        comment = {"id": 2, "user": {"username": "someone-else"}}
+        self.assertFalse(main.is_comment_from_bot(comment, config))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -21,6 +21,7 @@ class Config:
                 self.gitea_base_url += '/api/v1'
         self.gitea_token = os.getenv('GITEA_TOKEN')
         self.gitea_username = os.getenv('GITEA_USERNAME', 'oauth2')
+        self.gitea_bot_username = os.getenv('GITEA_BOT_USERNAME', self.gitea_username)
         self.gitea_repos = [repo.strip() for repo in os.getenv('GITEA_REPOS', '').split(',') if repo.strip()]
         self.polling_frequency = int(os.getenv('POLLING_FREQUENCY', '60'))
         self.issue_label_reserve = os.getenv('ISSUE_LABEL_RESERVE', 'agent-working')
@@ -87,6 +88,7 @@ class Config:
             "gitea_base_url": self.gitea_base_url,
             "gitea_token": _redact(self.gitea_token),
             "gitea_username": self.gitea_username,
+            "gitea_bot_username": self.gitea_bot_username,
             "gitea_repos": self.gitea_repos,
             "polling_frequency": self.polling_frequency,
             "issue_label_reserve": self.issue_label_reserve,
