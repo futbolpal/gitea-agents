@@ -306,8 +306,26 @@ def main():
                 prs = client.get_pulls(owner, repo_name, state='open')
                 for pr in prs:
                     pr_number = pr['number']
-                    if is_pr_stale(client, owner, repo_name, pr_number, logger):
+                    stale = is_pr_stale(client, owner, repo_name, pr_number, logger)
+                    active_pr_pids = [pid for pid, info in active_subprocesses.items()
+                                      if info.get('pr_number') == pr_number]
+                    has_pr_worker = len(active_pr_pids) > 0
+                    if stale:
                         logger.info(f"PR #{pr_number} in {repo} is behind its base branch")
+                        if not has_pr_worker and len(active_subprocesses) < config.max_concurrent_subagents:
+                            try:
+                                proc = spawn_subagent(['--update-pr', repo, str(pr_number)])
+                                active_subprocesses[proc.pid] = {
+                                    'proc': proc,
+                                    'work_item': 'stale_pr',
+                                    'id': pr_number,
+                                    'repo': repo,
+                                    'pr_number': pr_number,
+                                    'retry_count': 0
+                                }
+                                logger.info(f"Spawned subagent to update PR #{pr_number} in {repo} (PID: {proc.pid})")
+                            except Exception as e:
+                                logger.error(f"Failed to spawn subagent to update PR #{pr_number}: {e}")
 
                     # Get PR comments
                     comments = client.get_pull_comments(owner, repo_name, pr_number)
@@ -430,6 +448,8 @@ def main():
                             logger.info(f"Updated issue {issue_number} labels: added {config.issue_label_in_review}")
                     except Exception as e:
                         logger.error(f"Failed to update issue labels for {issue_number}: {e}")
+                elif proc_info['work_item'] == 'stale_pr':
+                    logger.info(f"Stale PR update completed for PR #{proc_info['id']}")
                 else:
                     # Add heart reaction to indicate addressed
                     owner, repo_name = proc_info['repo'].split('/', 1)
@@ -447,6 +467,8 @@ def main():
                     try:
                         if proc_info['work_item'] == 'issue':
                             proc = spawn_subagent(['--issue', str(proc_info['id']), proc_info['repo']])
+                        elif proc_info['work_item'] == 'stale_pr':
+                            proc = spawn_subagent(['--update-pr', proc_info['repo'], str(proc_info['id'])])
                         else:
                             pr_number = proc_info['pr_number']
                             if proc_info['work_item'] == 'review_comment':

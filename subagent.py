@@ -314,7 +314,7 @@ def do_work(prompt, repo_dir, config, head_branch):
 
 def main():
     if len(sys.argv) < 4:
-        print("Usage: python subagent.py --issue <issue_number> <repo> OR python subagent.py --comment <comment_id> <repo> <pr_number> <type> [review_id]", file=sys.stderr)
+        print("Usage: python subagent.py --issue <issue_number> <repo> OR python subagent.py --comment <comment_id> <repo> <pr_number> <type> [review_id] OR python subagent.py --update-pr <repo> <pr_number>", file=sys.stderr)
         sys.exit(1)
 
     comment_id = None
@@ -323,6 +323,7 @@ def main():
     pr_number = None
     comment_type = None
     review_id = None
+    update_pr_number = None
 
     if sys.argv[1] == '--issue':
         if len(sys.argv) < 4:
@@ -351,8 +352,18 @@ def main():
         except ValueError as e:
             print(f"Invalid arguments: {e}", file=sys.stderr)
             sys.exit(1)
+    elif sys.argv[1] == '--update-pr':
+        if len(sys.argv) < 4:
+            print("Usage: python subagent.py --update-pr <repo> <pr_number>", file=sys.stderr)
+            sys.exit(1)
+        try:
+            repo = sys.argv[2]
+            update_pr_number = int(sys.argv[3])
+        except ValueError as e:
+            print(f"Invalid arguments: {e}", file=sys.stderr)
+            sys.exit(1)
     else:
-        print("Invalid mode. Use --issue or --comment", file=sys.stderr)
+        print("Invalid mode. Use --issue, --comment, or --update-pr", file=sys.stderr)
         sys.exit(1)
 
     os.environ['PROCESS_TYPE'] = 'subagent'
@@ -362,8 +373,12 @@ def main():
     config.log_config(logger)
     if issue_number:
         logger.info(f"Starting subagent for issue {issue_number} in repo {repo}")
-    else:
+    elif comment_id:
         logger.info(f"Starting subagent for comment {comment_id} on PR #{pr_number} in repo {repo}")
+    elif update_pr_number:
+        logger.info(f"Starting subagent to update stale PR #{update_pr_number} in repo {repo}")
+    else:
+        logger.info("Starting subagent")
 
     client = GiteaClient(config.gitea_base_url, config.gitea_token)
 
@@ -391,6 +406,78 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     atexit.register(cleanup)
+
+    if update_pr_number:
+        pr_number = update_pr_number
+        try:
+            pr = client.get_pull_request(owner, repo_name, pr_number)
+            base_ref = pr.get('base', {}).get('ref')
+            head_branch = pr.get('head', {}).get('ref')
+            if not base_ref or not head_branch:
+                logger.error("PR #%s missing base or head ref", pr_number)
+                sys.exit(1)
+        except Exception as e:
+            logger.error(f"Failed to get PR #{pr_number} details: {e}")
+            sys.exit(1)
+
+        repo_temp_dir = _make_repo_temp_dir(config, logger)
+        logger.info(f"Cloning repo {owner}/{repo_name} to {repo_temp_dir}")
+        try:
+            base_url = _strip_api_suffix(config.gitea_base_url)
+            protocol = 'https' if base_url.startswith('https://') else 'http'
+            host = base_url.replace('https://', '').replace('http://', '')
+            clone_url = f"{protocol}://{config.gitea_username}:{config.gitea_token}@{host}/{owner}/{repo_name}.git"
+            subprocess.run(["git", "clone", clone_url, repo_temp_dir], check=True)
+            logger.info("Repository cloned successfully")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to clone repository: {e}")
+            sys.exit(1)
+
+        try:
+            logger.info(f"Checking out branch {head_branch}")
+            subprocess.run(['git', 'checkout', head_branch], cwd=repo_temp_dir, check=True)
+            logger.info(f"Checked out branch {head_branch}")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to checkout branch {head_branch}: {e}")
+            shutil.rmtree(repo_temp_dir)
+            sys.exit(1)
+
+        try:
+            if not _branch_is_behind_base(repo_temp_dir, base_ref):
+                logger.info("PR #%s is already up to date with %s", pr_number, base_ref)
+                shutil.rmtree(repo_temp_dir)
+                sys.exit(0)
+
+            logger.info("PR #%s is behind %s; attempting merge", pr_number, base_ref)
+            merge_result = _merge_base_into_head(repo_temp_dir, base_ref)
+            if merge_result.returncode != 0:
+                conflicts = _merge_conflicts(repo_temp_dir)
+                logger.warning("Merge conflicts detected: %s", ", ".join(conflicts) if conflicts else "unknown")
+                merge_prompt = (
+                    f"Resolve merge conflicts after merging origin/{base_ref} into {head_branch}. "
+                    "Only resolve conflict markers; do not change unrelated code."
+                )
+                do_work(merge_prompt, repo_temp_dir, config, head_branch)
+                conflicts = _merge_conflicts(repo_temp_dir)
+                if conflicts:
+                    _comment_merge_failure(client, owner, repo_name, pr_number, base_ref, conflicts, "Merge conflicts remain")
+                    logger.error("Merge conflicts remain after attempted resolution")
+                    shutil.rmtree(repo_temp_dir)
+                    sys.exit(0)
+                _finalize_merge(repo_temp_dir, base_ref, head_branch, logger)
+
+            _push_branch(repo_temp_dir, head_branch, logger)
+            logger.info("Pushed merged branch %s for PR #%s", head_branch, pr_number)
+            shutil.rmtree(repo_temp_dir)
+            sys.exit(0)
+        except Exception as e:
+            try:
+                conflicts = _merge_conflicts(repo_temp_dir)
+                _comment_merge_failure(client, owner, repo_name, pr_number, base_ref, conflicts, e)
+            except Exception as comment_error:
+                logger.error("Failed to comment about merge failure: %s", comment_error)
+            shutil.rmtree(repo_temp_dir)
+            sys.exit(0)
 
     if comment_id:
         # Handle comment processing - make code changes on PR branch
