@@ -112,6 +112,12 @@ class GiteaClient:
         logger.debug(f"Getting PR #{pull_number} details from {owner}/{repo}")
         return self._make_request('GET', url)
 
+    def compare_commits(self, owner, repo, base, head):
+        """Compare two refs and return ahead/behind counts."""
+        url = f'{self.base_url}/repos/{owner}/{repo}/compare/{base}...{head}'
+        logger.debug(f"Comparing {base}...{head} in {owner}/{repo}")
+        return self._make_request('GET', url)
+
     def create_pull_comment(self, owner, repo, pull_number, body):
         """Create a comment on a pull request."""
         url = f'{self.base_url}/repos/{owner}/{repo}/issues/{pull_number}/comments'

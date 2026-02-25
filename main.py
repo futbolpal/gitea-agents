@@ -29,6 +29,22 @@ def is_comment_completed(client, owner, repo_name, comment_id, logger):
         logger.warning(f"Could not check if comment {comment_id} is completed: {e}")
         return False
 
+def is_pr_stale(client, owner, repo_name, pr_number, logger):
+    try:
+        pr = client.get_pull_request(owner, repo_name, pr_number)
+        base = pr.get('base', {}).get('ref')
+        head = pr.get('head', {}).get('ref')
+        if not base or not head:
+            return False
+        compare = client.compare_commits(owner, repo_name, base, head)
+        behind_by = compare.get('behind_by')
+        if behind_by is None:
+            return False
+        return behind_by > 0
+    except Exception as e:
+        logger.warning(f"Could not check staleness for PR #{pr_number}: {e}")
+        return False
+
 def is_comment_from_bot(comment, config):
     if not isinstance(comment, dict):
         return False
@@ -290,6 +306,8 @@ def main():
                 prs = client.get_pulls(owner, repo_name, state='open')
                 for pr in prs:
                     pr_number = pr['number']
+                    if is_pr_stale(client, owner, repo_name, pr_number, logger):
+                        logger.info(f"PR #{pr_number} in {repo} is behind its base branch")
 
                     # Get PR comments
                     comments = client.get_pull_comments(owner, repo_name, pr_number)

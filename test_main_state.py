@@ -40,6 +40,19 @@ class TestMainState(unittest.TestCase):
         comment = {"id": 2, "body": "Hello world"}
         self.assertFalse(main.is_comment_self_authored(comment))
 
+    def test_is_pr_stale(self):
+        client = MagicMock()
+        client.get_pull_request.return_value = {
+            "base": {"ref": "main"},
+            "head": {"ref": "feature"},
+        }
+        client.compare_commits.return_value = {"behind_by": 3}
+        logger = MagicMock()
+        self.assertTrue(main.is_pr_stale(client, "owner", "repo", 1, logger))
+
+        client.compare_commits.return_value = {"behind_by": 0}
+        self.assertFalse(main.is_pr_stale(client, "owner", "repo", 1, logger))
+
 
 if __name__ == '__main__':
     unittest.main()
