@@ -53,6 +53,20 @@ class TestMainState(unittest.TestCase):
         client.compare_commits.return_value = {"behind_by": 0}
         self.assertFalse(main.is_pr_stale(client, "owner", "repo", 1, logger))
 
+    def test_has_unresolved_conflict_comment(self):
+        client = MagicMock()
+        comment = {
+            "id": 10,
+            "body": "<!-- kilo-agent -->\nmerge conflicts\nConflicting files:\n- a.txt"
+        }
+        client.get_pull_comments.return_value = [comment]
+        client.get_comment_reactions.return_value = []
+        logger = MagicMock()
+        self.assertTrue(main.has_unresolved_conflict_comment(client, "owner", "repo", 1, logger))
+
+        client.get_comment_reactions.return_value = [{"content": "heart"}]
+        self.assertFalse(main.has_unresolved_conflict_comment(client, "owner", "repo", 1, logger))
+
 
 if __name__ == '__main__':
     unittest.main()

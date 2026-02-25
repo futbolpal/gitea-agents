@@ -45,6 +45,33 @@ def is_pr_stale(client, owner, repo_name, pr_number, logger):
         logger.warning(f"Could not check staleness for PR #{pr_number}: {e}")
         return False
 
+def has_unresolved_conflict_comment(client, owner, repo_name, pr_number, logger):
+    try:
+        comments = client.get_pull_comments(owner, repo_name, pr_number) or []
+        for comment in comments:
+            body = (comment.get('body') or "")
+            if "<!-- kilo-agent -->" not in body:
+                continue
+            if "merge conflicts" not in body and "Conflicting files" not in body:
+                continue
+            comment_id = comment.get('id')
+            if not comment_id:
+                continue
+            try:
+                reactions = client.get_comment_reactions(owner, repo_name, comment_id)
+                if reactions:
+                    has_heart = any(r.get('content') == 'heart' for r in reactions)
+                    if has_heart:
+                        continue
+                return True
+            except Exception as e:
+                logger.warning(f"Could not check reactions for conflict comment {comment_id}: {e}")
+                return True
+        return False
+    except Exception as e:
+        logger.warning(f"Could not check conflict comments for PR #{pr_number}: {e}")
+        return True
+
 def is_comment_from_bot(comment, config):
     if not isinstance(comment, dict):
         return False
@@ -312,6 +339,9 @@ def main():
                     has_pr_worker = len(active_pr_pids) > 0
                     if stale:
                         logger.info(f"PR #{pr_number} in {repo} is behind its base branch")
+                        if has_unresolved_conflict_comment(client, owner, repo_name, pr_number, logger):
+                            logger.info(f"PR #{pr_number} has unresolved merge conflicts; skipping auto-update")
+                            continue
                         if not has_pr_worker and len(active_subprocesses) < config.max_concurrent_subagents:
                             try:
                                 proc = spawn_subagent(['--update-pr', repo, str(pr_number)])
