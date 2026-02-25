@@ -10,3 +10,5 @@ workspace/
 tmp/
 *.log
 *.log.*
+
+.env
