@@ -259,7 +259,9 @@ def _finalize_merge(repo_dir, base_ref, head_branch, logger):
 
 def _comment_merge_failure(client, owner, repo_name, pr_number, base_ref, conflicts, error):
     conflict_list = "\n".join(f"- {path}" for path in conflicts) if conflicts else "- (unknown)"
+    marker = "<!-- kilo-agent -->"
     body = (
+        f"{marker}\n"
         "I attempted to update this branch with the latest changes from "
         f"`{base_ref}`, but hit merge conflicts I could not resolve automatically.\n\n"
         "Conflicting files:\n"

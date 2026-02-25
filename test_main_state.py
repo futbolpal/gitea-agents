@@ -33,6 +33,13 @@ class TestMainState(unittest.TestCase):
         comment = {"id": 2, "user": {"username": "someone-else"}}
         self.assertFalse(main.is_comment_from_bot(comment, config))
 
+    def test_is_comment_self_authored(self):
+        comment = {"id": 1, "body": "Hello\n<!-- kilo-agent -->\nThanks"}
+        self.assertTrue(main.is_comment_self_authored(comment))
+
+        comment = {"id": 2, "body": "Hello world"}
+        self.assertFalse(main.is_comment_self_authored(comment))
+
 
 if __name__ == '__main__':
     unittest.main()

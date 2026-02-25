@@ -38,6 +38,12 @@ def is_comment_from_bot(comment, config):
         return False
     return username.lower() == config.gitea_bot_username.lower()
 
+def is_comment_self_authored(comment):
+    if not isinstance(comment, dict):
+        return False
+    body = comment.get('body') or ""
+    return "<!-- kilo-agent -->" in body
+
 def is_subagent_pid(pid, logger):
     try:
         process = psutil.Process(pid)
@@ -302,6 +308,9 @@ def main():
                         logger.info(f"Checking {len(all_comments)} comments/reviews on PR #{pr_number}")
 
                     for comment in all_comments:
+                        if is_comment_self_authored(comment):
+                            logger.debug(f"Skipping self-authored comment {comment.get('id')}")
+                            continue
                         if is_comment_from_bot(comment, config):
                             logger.debug(f"Skipping bot-authored comment {comment.get('id')}")
                             continue
