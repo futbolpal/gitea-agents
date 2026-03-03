@@ -43,16 +43,6 @@ class Config:
         self.workspace_dir = os.getenv('WORKSPACE_DIR', '/workspace')
         self.git_user_name = os.getenv('GIT_USER_NAME', 'kilo-agent')
         self.git_user_email = os.getenv('GIT_USER_EMAIL', 'kilo-agent@localhost')
-        self.openrouter_api_key = os.getenv('OPENROUTER_API_KEY')
-        self.openrouter_base_url = os.getenv('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1')
-        self.openrouter_referrer = os.getenv('OPENROUTER_REFERRER')
-        self.openrouter_title = os.getenv('OPENROUTER_TITLE', 'kilo-agent')
-        self.comment_analyzer_model = os.getenv('COMMENT_ANALYZER_MODEL', '@preset/kilo-agent-comment-analyzer')
-        enabled_env = os.getenv('COMMENT_ANALYZER_ENABLED', '')
-        if enabled_env:
-            self.comment_analyzer_enabled = enabled_env.lower() in ('1', 'true', 'yes')
-        else:
-            self.comment_analyzer_enabled = bool(self.openrouter_api_key)
 
     def setup_logging(self):
         """Setup logging configuration with console and file handlers."""
@@ -119,12 +109,6 @@ class Config:
             "max_context_chars": self.max_context_chars,
             "git_user_name": self.git_user_name,
             "git_user_email": self.git_user_email,
-            "openrouter_api_key": _redact(self.openrouter_api_key),
-            "openrouter_base_url": self.openrouter_base_url,
-            "openrouter_referrer": self.openrouter_referrer,
-            "openrouter_title": self.openrouter_title,
-            "comment_analyzer_model": self.comment_analyzer_model,
-            "comment_analyzer_enabled": self.comment_analyzer_enabled,
         }
         logger.info("Configuration: %s", config_view)
 

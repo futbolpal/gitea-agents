@@ -9,7 +9,6 @@ import psutil
 import sys
 from config import Config
 from gitea_client import GiteaClient
-from comment_analyzer import analyze_comment
 
 def is_issue_completed(client, owner, repo_name, issue_number, config, logger):
     """Check if an issue is completed (has the in-review label)."""
@@ -398,26 +397,6 @@ def main():
                         if has_heart:
                             logger.debug(f"Comment {comment['id']} already addressed (has heart reaction)")
                             continue
-
-                        analysis = analyze_comment(comment.get('body', ''), config)
-                        if analysis:
-                            classification = analysis.get('classification')
-                            if classification == 'question':
-                                answer = analysis.get('answer', '').strip()
-                                if answer:
-                                    try:
-                                        response_body = "<!-- kilo-agent -->\n" + answer
-                                        client.create_pull_comment(owner, repo_name, pr_number, response_body)
-                                        client.add_comment_reaction(owner, repo_name, comment['id'], 'heart')
-                                        logger.info(f"Answered question comment {comment['id']} on PR #{pr_number}")
-                                    except Exception as e:
-                                        logger.error(f"Failed to respond to comment {comment['id']}: {e}")
-                                else:
-                                    logger.info(f"Question comment {comment['id']} had no answer; skipping")
-                                continue
-                            if classification == 'ignore':
-                                logger.info(f"Ignoring comment {comment['id']} based on analyzer")
-                                continue
 
                         # Check spawning condition: !reserved || (reserved && !hasProcWorker && !completed && !hasPrWorker)
                         reserved = has_eyes
