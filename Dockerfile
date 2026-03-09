@@ -10,7 +10,7 @@ RUN groupadd -r kilocode && \
 
 
 RUN apt-get update && apt-get install -y curl git nodejs npm && \
-    npm install -g @kilocode/cli @openai/codex && \
+    npm install -g @kilocode/cli @openai/codex@0.112.0 && \
     which kilocode || (echo "kilocode not found in PATH" && exit 1) && \
     which codex || (echo "codex not found in PATH" && exit 1) && \
     apt-get clean && rm -rf /var/lib/apt/lists/*

@@ -108,7 +108,7 @@ Set the following environment variables:
    ```
 3. (Optional) Install Codex CLI:
    ```bash
-   npm install -g @openai/codex
+   npm install -g @openai/codex@0.112.0
    ```
 
 4. Run the agent:
@@ -124,7 +124,7 @@ Codex CLI can authenticate either via browser login (`codex --login`) or by usin
 
 1. Install the CLI:
    ```bash
-   npm install -g @openai/codex
+   npm install -g @openai/codex@0.112.0
    ```
 
 2. Export an API key in the environment (recommended):
