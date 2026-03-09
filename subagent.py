@@ -8,9 +8,10 @@ import atexit
 import subprocess
 import tempfile
 import shutil
+import re
 from config import Config
 from gitea_client import GiteaClient
-from agent_runner import run_agent
+from agent_runner import run_agent, run_codex
 
 def _strip_api_suffix(base_url):
     if base_url.endswith('/api/v1'):
@@ -271,6 +272,154 @@ def _comment_merge_failure(client, owner, repo_name, pr_number, base_ref, confli
     )
     client.create_pull_comment(owner, repo_name, pr_number, body)
 
+COMMENT_REPLY_MARKER = "<!-- kilo-agent -->"
+
+COMMENT_CLASSIFIER_SYSTEM_PROMPT = (
+    "You are a PR comment triage assistant. Return JSON only. "
+    "Schema: {\"classification\": \"question\"|\"action\"|\"both\"|\"ignore\", "
+    "\"answer\": string, \"reason\": string}. "
+    "If classification is action or ignore, answer must be empty. "
+    "If classification is question or both, provide a concise answer based only on the comment text. "
+    "If unclear, ask a short clarification question in the answer."
+)
+
+PR_SUMMARY_SYSTEM_PROMPT = (
+    "You are generating a pull request summary. Output Markdown only. "
+    "Include sections: Summary, Why, Testing. Be concise and factual. "
+    "Do not mention internal agent tooling."
+)
+
+
+def _extract_json_block(text):
+    if not text:
+        return None
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    return match.group(0) if match else None
+
+
+def _parse_comment_classification(text):
+    blob = _extract_json_block(text)
+    if not blob:
+        return None
+    try:
+        data = json.loads(blob)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    classification = data.get("classification")
+    answer = (data.get("answer") or "").strip()
+    reason = (data.get("reason") or "").strip()
+    if classification not in ("question", "action", "both", "ignore"):
+        return None
+    if classification in ("action", "ignore"):
+        answer = ""
+    return {"classification": classification, "answer": answer, "reason": reason}
+
+
+def _git_porcelain(repo_dir):
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=repo_dir,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def _ensure_clean_repo(repo_dir, logger):
+    status = _git_porcelain(repo_dir)
+    if not status:
+        return
+    logger.warning("Repo dirty after codex run, resetting changes")
+    subprocess.run(["git", "reset", "--hard"], cwd=repo_dir, check=False)
+    subprocess.run(["git", "clean", "-fd"], cwd=repo_dir, check=False)
+
+
+def _run_codex_text(prompt, repo_dir, config, logger):
+    result, output_path = run_codex(prompt, repo_dir, config)
+    try:
+        with open(output_path, "r", encoding="utf-8") as handle:
+            output = handle.read()
+    except Exception:
+        output = ""
+    if result.returncode != 0:
+        logger.error("Codex text run failed: %s", result.stderr)
+        return None
+    _ensure_clean_repo(repo_dir, logger)
+    return output
+
+
+def _classify_comment(comment_body, context, repo_dir, config, logger):
+    prompt = (
+        f"{COMMENT_CLASSIFIER_SYSTEM_PROMPT}\n\n"
+        "Comment:\n"
+        f"{comment_body}\n\n"
+        "Context:\n"
+        f"{context}\n"
+    )
+    output = _run_codex_text(prompt, repo_dir, config, logger)
+    if not output:
+        return None
+    parsed = _parse_comment_classification(output)
+    if not parsed:
+        logger.warning("Failed to parse comment classification output: %s", output)
+    return parsed
+
+
+def _fallback_pr_summary(diffstat, files_changed):
+    lines = [
+        "## Summary",
+        "Changes in:",
+    ]
+    for path in files_changed:
+        lines.append(f"- {path}")
+    lines += [
+        "",
+        "## Why",
+        "See linked issue for context.",
+        "",
+        "## Testing",
+        "- Not run (not specified).",
+    ]
+    if diffstat:
+        lines += ["", "## Diffstat", diffstat.strip()]
+    return "\n".join(lines)
+
+
+def _generate_pr_summary(issue, base_branch, repo_dir, config, logger):
+    diffstat = subprocess.run(
+        ["git", "diff", "--stat", f"origin/{base_branch}...HEAD"],
+        cwd=repo_dir,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    ).stdout.strip()
+    files_changed = subprocess.run(
+        ["git", "diff", "--name-only", f"origin/{base_branch}...HEAD"],
+        cwd=repo_dir,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    ).stdout.strip().splitlines()
+
+    prompt = (
+        f"{PR_SUMMARY_SYSTEM_PROMPT}\n\n"
+        f"Issue Title: {issue.get('title')}\n"
+        f"Issue Body:\n{issue.get('body')}\n\n"
+        f"Diffstat:\n{diffstat}\n\n"
+        f"Files Changed:\n" + "\n".join(files_changed)
+    )
+    if config.agent_cli == "codex":
+        output = _run_codex_text(prompt, repo_dir, config, logger)
+        if output:
+            return output.strip()
+    return _fallback_pr_summary(diffstat, files_changed)
+
 def _load_prompt_template(config):
     default_template = (
         "Do not create any new issues or pull requests. Only make code changes as requested.\n"
@@ -487,6 +636,9 @@ def main():
                 comment = client._make_request('GET', f'{client.base_url}/repos/{owner}/{repo_name}/issues/comments/{comment_id}')
                 body = comment['body']
                 context = ""
+                path = None
+                position = None
+                diff_hunk = ""
             elif comment_type == 'review_comment':
                 comment = client.get_pull_review_comment(owner, repo_name, pr_number, review_id, comment_id)
                 body = comment['body']
@@ -574,6 +726,37 @@ def main():
                     logger.error("Failed to comment about merge failure: %s", comment_error)
                 shutil.rmtree(repo_temp_dir)
                 sys.exit(0)
+
+        classification = None
+        if config.agent_cli == "codex":
+            analysis = _classify_comment(body, context, repo_temp_dir, config, logger)
+            if analysis:
+                classification = analysis.get("classification")
+                answer = analysis.get("answer", "").strip()
+                if classification in ("question", "both") and answer:
+                    response_body = f"{COMMENT_REPLY_MARKER}\n{answer}"
+                    if comment_type == "review_comment" and path and position is not None:
+                        try:
+                            client.create_pull_review_comment(
+                                owner,
+                                repo_name,
+                                pr_number,
+                                response_body,
+                                path=path,
+                                position=position,
+                            )
+                            logger.info("Posted inline answer on PR #%s", pr_number)
+                        except Exception as e:
+                            logger.warning("Inline reply failed, falling back to PR comment: %s", e)
+                            client.create_pull_comment(owner, repo_name, pr_number, response_body)
+                    else:
+                        client.create_pull_comment(owner, repo_name, pr_number, response_body)
+                    logger.info("Answered comment %s as %s", comment_id, classification)
+
+        if classification == "question":
+            logger.info("Comment classified as question only; skipping code changes")
+            shutil.rmtree(repo_temp_dir)
+            sys.exit(0)
 
         head_before = _get_git_head(repo_temp_dir)
 
@@ -711,12 +894,14 @@ def main():
             repo_info = client.get_repo(owner, repo_name)
             default_branch = repo_info.get('default_branch', 'main')
             logger.info(f"Using default branch: {default_branch}")
+            summary = _generate_pr_summary(issue, default_branch, repo_temp_dir, config, logger)
+            pr_body = f"{summary}\n\nCloses #{issue_number}\n\n{issue['body']}"
             pr = client.create_pull_request(
                 owner, repo_name,
                 f"Fix issue #{issue_number}: {issue['title']}",
                 head_branch,
                 default_branch,
-                f"Closes #{issue_number}\n\n{issue['body']}"
+                pr_body
             )
             pr_number = pr['number']
             logger.info(f"Created PR #{pr_number} for issue {issue_number}")
