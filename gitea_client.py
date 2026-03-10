@@ -125,6 +125,17 @@ class GiteaClient:
         logger.info(f"Creating comment on PR #{pull_number} in {owner}/{repo}")
         return self._make_request('POST', url, json=data)
 
+    def create_pull_review_comment(self, owner, repo, pull_number, body, path=None, position=None):
+        """Create an inline review comment on a pull request."""
+        url = f'{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}/comments'
+        data = {'body': body}
+        if path is not None:
+            data['path'] = path
+        if position is not None:
+            data['position'] = position
+        logger.info(f"Creating review comment on PR #{pull_number} in {owner}/{repo}")
+        return self._make_request('POST', url, json=data)
+
     def get_issue(self, owner, repo, issue_number):
         """Get a specific issue."""
         url = f'{self.base_url}/repos/{owner}/{repo}/issues/{issue_number}'

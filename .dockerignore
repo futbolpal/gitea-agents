@@ -3,6 +3,7 @@
 .git/
 .gitignore
 .env
+.env*
 workspace/
 data/
 tmp/
