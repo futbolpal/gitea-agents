@@ -369,6 +369,48 @@ def _classify_comment(comment_body, context, repo_dir, config, logger):
     return parsed
 
 
+def _answer_comment_if_needed(
+    client,
+    owner,
+    repo_name,
+    pr_number,
+    comment_type,
+    path,
+    position,
+    comment_id,
+    analysis,
+    logger,
+):
+    if not analysis:
+        return None
+
+    classification = analysis.get("classification")
+    answer = analysis.get("answer", "").strip()
+    if classification not in ("question", "both") or not answer:
+        return classification
+
+    response_body = f"{COMMENT_REPLY_MARKER}\n{answer}"
+    if comment_type == "review_comment" and path and position is not None:
+        try:
+            client.create_pull_review_comment(
+                owner,
+                repo_name,
+                pr_number,
+                response_body,
+                path=path,
+                position=position,
+            )
+            logger.info("Posted inline answer on PR #%s", pr_number)
+            logger.info("Answered comment %s as %s", comment_id, classification)
+            return classification
+        except Exception as e:
+            logger.warning("Inline reply failed, falling back to PR comment: %s", e)
+
+    client.create_pull_comment(owner, repo_name, pr_number, response_body)
+    logger.info("Answered comment %s as %s", comment_id, classification)
+    return classification
+
+
 def _fallback_pr_summary(diffstat, files_changed):
     lines = [
         "## Summary",
@@ -695,6 +737,28 @@ def main():
             shutil.rmtree(repo_temp_dir)
             sys.exit(1)
 
+        classification = None
+        if config.agent_cli == "codex":
+            analysis = _classify_comment(body, context, repo_temp_dir, config, logger)
+            if analysis:
+                classification = _answer_comment_if_needed(
+                    client,
+                    owner,
+                    repo_name,
+                    pr_number,
+                    comment_type,
+                    path,
+                    position,
+                    comment_id,
+                    analysis,
+                    logger,
+                )
+
+        if classification == "question":
+            logger.info("Comment classified as question only; skipping code changes")
+            shutil.rmtree(repo_temp_dir)
+            sys.exit(0)
+
         base_ref = pr.get('base', {}).get('ref')
         if base_ref:
             try:
@@ -726,37 +790,6 @@ def main():
                     logger.error("Failed to comment about merge failure: %s", comment_error)
                 shutil.rmtree(repo_temp_dir)
                 sys.exit(0)
-
-        classification = None
-        if config.agent_cli == "codex":
-            analysis = _classify_comment(body, context, repo_temp_dir, config, logger)
-            if analysis:
-                classification = analysis.get("classification")
-                answer = analysis.get("answer", "").strip()
-                if classification in ("question", "both") and answer:
-                    response_body = f"{COMMENT_REPLY_MARKER}\n{answer}"
-                    if comment_type == "review_comment" and path and position is not None:
-                        try:
-                            client.create_pull_review_comment(
-                                owner,
-                                repo_name,
-                                pr_number,
-                                response_body,
-                                path=path,
-                                position=position,
-                            )
-                            logger.info("Posted inline answer on PR #%s", pr_number)
-                        except Exception as e:
-                            logger.warning("Inline reply failed, falling back to PR comment: %s", e)
-                            client.create_pull_comment(owner, repo_name, pr_number, response_body)
-                    else:
-                        client.create_pull_comment(owner, repo_name, pr_number, response_body)
-                    logger.info("Answered comment %s as %s", comment_id, classification)
-
-        if classification == "question":
-            logger.info("Comment classified as question only; skipping code changes")
-            shutil.rmtree(repo_temp_dir)
-            sys.exit(0)
 
         head_before = _get_git_head(repo_temp_dir)
 
