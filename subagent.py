@@ -221,6 +221,29 @@ def _git_output(repo_dir, args):
     )
     return result
 
+def _create_branch_from_remote_base(repo_dir, base_branch, head_branch, logger):
+    fetch_result = _git_output(repo_dir, ['git', 'fetch', 'origin', base_branch])
+    if fetch_result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            fetch_result.returncode,
+            fetch_result.args,
+            output=fetch_result.stdout,
+            stderr=fetch_result.stderr,
+        )
+
+    logger.debug("Creating branch %s from origin/%s", head_branch, base_branch)
+    checkout_result = _git_output(
+        repo_dir,
+        ['git', 'checkout', '-B', head_branch, f'origin/{base_branch}'],
+    )
+    if checkout_result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            checkout_result.returncode,
+            checkout_result.args,
+            output=checkout_result.stdout,
+            stderr=checkout_result.stderr,
+        )
+
 def _branch_is_behind_base(repo_dir, base_ref):
     fetch = _git_output(repo_dir, ['git', 'fetch', 'origin', base_ref])
     if fetch.returncode != 0:
@@ -654,8 +677,16 @@ def main():
     # Perform actual work
     head_branch = f"fix-issue-{issue_number}"
     try:
-        logger.debug(f"Creating branch {head_branch}")
-        subprocess.run(['git', 'checkout', '-b', head_branch], cwd=repo_temp_dir, check=True)
+        repo_info = client.get_repo(owner, repo_name)
+        default_branch = repo_info.get('default_branch', 'main')
+        logger.info("Using default branch as issue base: %s", default_branch)
+    except Exception as e:
+        logger.error(f"Failed to get repository details: {e}")
+        shutil.rmtree(repo_temp_dir)
+        sys.exit(1)
+
+    try:
+        _create_branch_from_remote_base(repo_temp_dir, default_branch, head_branch, logger)
         logger.info(f"Created and checked out branch {head_branch}")
     except subprocess.CalledProcessError as e:
         logger.error(f"Failed to create branch {head_branch}: {e}")
@@ -707,9 +738,6 @@ def main():
     if changes_made:
         try:
             logger.debug(f"Creating PR with head={head_branch}")
-            # Get the default branch for the repository
-            repo_info = client.get_repo(owner, repo_name)
-            default_branch = repo_info.get('default_branch', 'main')
             logger.info(f"Using default branch: {default_branch}")
             pr = client.create_pull_request(
                 owner, repo_name,

@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import main
+import subagent
 
 
 class TestMainState(unittest.TestCase):
@@ -66,6 +67,22 @@ class TestMainState(unittest.TestCase):
 
         client.get_comment_reactions.return_value = [{"content": "heart"}]
         self.assertFalse(main.has_unresolved_conflict_comment(client, "owner", "repo", 1, logger))
+
+    @patch('subagent._git_output')
+    def test_create_branch_from_remote_base(self, mock_git_output):
+        mock_git_output.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr="", args=['git', 'fetch', 'origin', 'main']),
+            MagicMock(returncode=0, stdout="", stderr="", args=['git', 'checkout', '-B', 'fix-issue-1', 'origin/main']),
+        ]
+        logger = MagicMock()
+
+        subagent._create_branch_from_remote_base('/tmp/repo', 'main', 'fix-issue-1', logger)
+
+        self.assertEqual(mock_git_output.call_args_list[0].args[1], ['git', 'fetch', 'origin', 'main'])
+        self.assertEqual(
+            mock_git_output.call_args_list[1].args[1],
+            ['git', 'checkout', '-B', 'fix-issue-1', 'origin/main'],
+        )
 
 
 if __name__ == '__main__':
