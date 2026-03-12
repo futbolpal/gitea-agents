@@ -151,6 +151,12 @@ Run the integration test to verify API connectivity and basic functionality:
 python test_integration.py
 ```
 
+Run the live issue-plan E2E against `futbolpal/kilo-agents-test`:
+
+```bash
+RUN_LIVE_GITEA_E2E=1 python3 -m unittest e2e.test_live_issue_plan_e2e
+```
+
 The test checks:
 - Configuration validation
 - Gitea API connectivity
