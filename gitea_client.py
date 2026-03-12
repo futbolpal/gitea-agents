@@ -100,6 +100,19 @@ class GiteaClient:
         logger.info(f"Creating pull request in {owner}/{repo}: {title}")
         return self._make_request('POST', url, json=data)
 
+    def update_pull_request(self, owner, repo, pull_number, title=None, body=None, base=None):
+        """Update an existing pull request."""
+        url = f'{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}'
+        data = {}
+        if title is not None:
+            data['title'] = title
+        if body is not None:
+            data['body'] = body
+        if base is not None:
+            data['base'] = base
+        logger.info(f"Updating pull request #{pull_number} in {owner}/{repo}")
+        return self._make_request('PATCH', url, json=data)
+
     def get_pull_comments(self, owner, repo, pull_number):
         """Get comments on a pull request."""
         url = f'{self.base_url}/repos/{owner}/{repo}/issues/{pull_number}/comments'
