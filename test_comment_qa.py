@@ -7,6 +7,9 @@ from subagent import (
     _compose_pr_body,
     _create_or_update_issue_pr,
     _ensure_issue_plan_comment,
+    _extract_issue_number_from_pr,
+    _format_issue_plan_context,
+    _get_issue_plan_comment_body,
     _parse_comment_classification,
 )
 
@@ -76,6 +79,39 @@ class TestCommentQA(unittest.TestCase):
     def test_compose_pr_body_omits_empty_issue_body(self):
         body = _compose_pr_body("## Summary\nBody", 7, None)
         self.assertEqual(body, "## Summary\nBody\n\nCloses #7")
+
+    def test_extract_issue_number_from_pr_prefers_closes_reference(self):
+        pr = {
+            "body": "## Summary\nStuff\n\nCloses #14",
+            "head": {"ref": "fix-issue-99"},
+        }
+        self.assertEqual(_extract_issue_number_from_pr(pr), 14)
+
+    def test_extract_issue_number_from_pr_falls_back_to_branch_name(self):
+        pr = {
+            "body": "No linked issue here",
+            "head": {"ref": "fix-issue-27"},
+        }
+        self.assertEqual(_extract_issue_number_from_pr(pr), 27)
+
+    def test_get_issue_plan_comment_body_returns_latest_marked_comment(self):
+        client = MagicMock()
+        client.get_issue_comments.return_value = [
+            {"id": 1, "body": "plain comment"},
+            {"id": 2, "body": "<!-- kilo-agent-issue-plan -->\n## Assessment\n- first"},
+            {"id": 3, "body": "<!-- kilo-agent-issue-plan -->\n## Assessment\n- latest"},
+        ]
+        logger = MagicMock()
+
+        body = _get_issue_plan_comment_body(client, "owner", "repo", 7, logger)
+
+        self.assertIn("- latest", body)
+
+    def test_format_issue_plan_context_strips_marker(self):
+        body = "<!-- kilo-agent-issue-plan -->\n## Assessment\n- one\n\n## Plan\n1. two"
+        formatted = _format_issue_plan_context(body)
+        self.assertTrue(formatted.startswith("Issue Assessment And Plan:\n## Assessment"))
+        self.assertNotIn("<!-- kilo-agent-issue-plan -->", formatted)
 
     @patch('subagent._run_codex_text', return_value="## Assessment\n- Understands the issue.\n- Notes the relevant code path.\n\n## Plan\n1. Inspect code.\n2. Implement fix.")
     def test_ensure_issue_plan_comment_posts_generated_comment(self, mock_run_codex_text):
