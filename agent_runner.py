@@ -13,7 +13,7 @@ def _ensure_cli_available(cli_name):
         raise FileNotFoundError(f"Required CLI '{cli_name}' not found in PATH")
 
 
-def _run_with_output_file(cmd, prompt, repo_dir, config):
+def _run_with_output_file(cmd, prompt, repo_dir, config, env=None):
     output_dir = config.data_dir
     os.makedirs(output_dir, exist_ok=True)
     with tempfile.NamedTemporaryFile(
@@ -31,6 +31,7 @@ def _run_with_output_file(cmd, prompt, repo_dir, config):
             cwd=repo_dir,
             input=prompt,
             text=True,
+            env=env,
             stdout=output_handle,
             stderr=subprocess.PIPE,
         )
@@ -48,6 +49,9 @@ def run_kilocode(prompt, repo_dir, config):
 def run_codex(prompt, repo_dir, config):
     _ensure_cli_available("codex")
     cmd = ["codex", "exec", "-C", repo_dir] + config.codex_exec_args
+    env = os.environ.copy()
+    if getattr(config, "codex_home", None):
+        env["CODEX_HOME"] = config.codex_home
     if config.codex_model:
         cmd += ["-m", config.codex_model]
     if config.codex_prompt_mode == "stdin":
@@ -58,7 +62,7 @@ def run_codex(prompt, repo_dir, config):
         input_prompt = None
 
     logger.info("Running codex with args: %s", " ".join(cmd))
-    result, output_path = _run_with_output_file(cmd, input_prompt, repo_dir, config)
+    result, output_path = _run_with_output_file(cmd, input_prompt, repo_dir, config, env=env)
     return result, output_path
 
 

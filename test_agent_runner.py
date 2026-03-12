@@ -23,6 +23,7 @@ class TestAgentRunner(unittest.TestCase):
         config = SimpleNamespace(
             agent_cli='codex',
             codex_exec_args=['--full-auto'],
+            codex_home='/tmp/codex-home',
             codex_model=None,
             codex_prompt_mode='stdin',
             data_dir=self.temp_dir,
@@ -38,6 +39,7 @@ class TestAgentRunner(unittest.TestCase):
         self.assertEqual(args[0][4], '--full-auto')
         self.assertEqual(args[0][-1], '-')
         self.assertEqual(kwargs['input'], prompt)
+        self.assertEqual(kwargs['env']['CODEX_HOME'], '/tmp/codex-home')
 
     @patch('agent_runner.subprocess.run')
     @patch('agent_runner.shutil.which')

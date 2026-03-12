@@ -52,6 +52,23 @@ class TestIntegration(unittest.TestCase):
         # Should not raise exception
         config.validate()
 
+    def test_config_resolves_relative_codex_home(self):
+        from config import Config
+
+        previous = os.environ.get('CODEX_HOME')
+        os.environ['CODEX_HOME'] = './.codex'
+        try:
+            config = Config()
+        finally:
+            if previous is None:
+                del os.environ['CODEX_HOME']
+            else:
+                os.environ['CODEX_HOME'] = previous
+
+        self.assertTrue(os.path.isabs(config.codex_home))
+        self.assertTrue(config.codex_home.endswith('.codex'))
+        self.assertTrue(os.path.exists(config.codex_home))
+
     @patch('main.GiteaClient')
     def test_repo_expansion(self, mock_gitea_client_class):
         """Test that 'owner/*' patterns are expanded to actual repos."""

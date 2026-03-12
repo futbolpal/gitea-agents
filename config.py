@@ -1,6 +1,7 @@
 import os
 import logging
 import shlex
+from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
 class CustomFormatter(logging.Formatter):
@@ -36,6 +37,7 @@ class Config:
         self.agent_cli = os.getenv('AGENT_CLI', 'kilocode').strip().lower()
         self.kilocode_args = shlex.split(os.getenv('KILOCODE_ARGS', '-a -m orchestrator -j'))
         self.codex_exec_args = shlex.split(os.getenv('CODEX_EXEC_ARGS', '--full-auto'))
+        self.codex_home = self._resolve_optional_path(os.getenv('CODEX_HOME'))
         self.codex_prompt_mode = os.getenv('CODEX_PROMPT_MODE', 'stdin').strip().lower()
         self.codex_model = os.getenv('CODEX_MODEL')
         self.prompt_template_path = os.getenv('PROMPT_TEMPLATE_PATH', 'prompt_template.txt')
@@ -43,6 +45,30 @@ class Config:
         self.workspace_dir = os.getenv('WORKSPACE_DIR', '/workspace')
         self.git_user_name = os.getenv('GIT_USER_NAME', 'kilo-agent')
         self.git_user_email = os.getenv('GIT_USER_EMAIL', 'kilo-agent@localhost')
+
+    def _resolve_optional_path(self, raw_path):
+        if not raw_path:
+            return None
+
+        path = Path(raw_path).expanduser()
+        if path.is_absolute():
+            return str(path)
+
+        cwd_candidate = (Path.cwd() / path).resolve()
+        if cwd_candidate.exists():
+            return str(cwd_candidate)
+
+        module_dir = Path(__file__).resolve().parent
+        seen = {cwd_candidate}
+        for base in [module_dir, *module_dir.parents]:
+            candidate = (base / path).resolve()
+            if candidate in seen:
+                continue
+            if candidate.exists():
+                return str(candidate)
+            seen.add(candidate)
+
+        return str(cwd_candidate)
 
     def setup_logging(self):
         """Setup logging configuration with console and file handlers."""
@@ -103,6 +129,7 @@ class Config:
             "agent_cli": self.agent_cli,
             "kilocode_args": self.kilocode_args,
             "codex_exec_args": self.codex_exec_args,
+            "codex_home": self.codex_home,
             "codex_prompt_mode": self.codex_prompt_mode,
             "codex_model": self.codex_model,
             "prompt_template_path": self.prompt_template_path,
