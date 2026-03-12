@@ -316,7 +316,7 @@ PR_SUMMARY_SYSTEM_PROMPT = (
 ISSUE_PLAN_SYSTEM_PROMPT = (
     "You are reviewing a repository issue before implementation. Output Markdown only. "
     "Include exactly two sections titled 'Assessment' and 'Plan'. "
-    "In Assessment, summarize the problem, relevant code areas, and any key uncertainty. "
+    "In Assessment, use a short flat bullet list. Each bullet should cover the problem, relevant code areas, or key uncertainty. "
     "In Plan, provide a short numbered list of concrete implementation steps. "
     "Do not claim work is already complete. Do not include code fences."
 )

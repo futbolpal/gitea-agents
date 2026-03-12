@@ -77,7 +77,7 @@ class TestCommentQA(unittest.TestCase):
         body = _compose_pr_body("## Summary\nBody", 7, None)
         self.assertEqual(body, "## Summary\nBody\n\nCloses #7")
 
-    @patch('subagent._run_codex_text', return_value="## Assessment\nUnderstands the issue.\n\n## Plan\n1. Inspect code.\n2. Implement fix.")
+    @patch('subagent._run_codex_text', return_value="## Assessment\n- Understands the issue.\n- Notes the relevant code path.\n\n## Plan\n1. Inspect code.\n2. Implement fix.")
     def test_ensure_issue_plan_comment_posts_generated_comment(self, mock_run_codex_text):
         client = MagicMock()
         client.get_issue_comments.return_value = []
@@ -101,7 +101,10 @@ class TestCommentQA(unittest.TestCase):
         body = client.create_issue_comment.call_args.args[3]
         self.assertIn('<!-- kilo-agent-issue-plan -->', body)
         self.assertIn('## Assessment', body)
+        self.assertIn('- Understands the issue.', body)
         self.assertIn('## Plan', body)
+        prompt = mock_run_codex_text.call_args.args[0]
+        self.assertIn('Assessment, use a short flat bullet list', prompt)
 
     @patch('subagent._run_codex_text')
     def test_ensure_issue_plan_comment_skips_existing_marker(self, mock_run_codex_text):
