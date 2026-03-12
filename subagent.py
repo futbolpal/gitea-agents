@@ -296,6 +296,7 @@ def _comment_merge_failure(client, owner, repo_name, pr_number, base_ref, confli
     client.create_pull_comment(owner, repo_name, pr_number, body)
 
 COMMENT_REPLY_MARKER = "<!-- kilo-agent -->"
+ISSUE_PLAN_COMMENT_MARKER = "<!-- kilo-agent-issue-plan -->"
 
 COMMENT_CLASSIFIER_SYSTEM_PROMPT = (
     "You are a PR comment triage assistant. Return JSON only. "
@@ -310,6 +311,14 @@ PR_SUMMARY_SYSTEM_PROMPT = (
     "You are generating a pull request summary. Output Markdown only. "
     "Include sections: Summary, Why, Testing. Be concise and factual. "
     "Do not mention internal agent tooling."
+)
+
+ISSUE_PLAN_SYSTEM_PROMPT = (
+    "You are reviewing a repository issue before implementation. Output Markdown only. "
+    "Include exactly two sections titled 'Assessment' and 'Plan'. "
+    "In Assessment, summarize the problem, relevant code areas, and any key uncertainty. "
+    "In Plan, provide a short numbered list of concrete implementation steps. "
+    "Do not claim work is already complete. Do not include code fences."
 )
 
 
@@ -461,6 +470,49 @@ def _compose_pr_body(summary, issue_number, issue_body):
     if body:
         parts.append(body)
     return "\n\n".join(part for part in parts if part)
+
+
+def _generate_issue_plan(issue, context, repo_dir, config, logger):
+    if config.agent_cli != "codex":
+        logger.info("Skipping issue plan comment because AGENT_CLI=%s", config.agent_cli)
+        return None
+
+    prompt = (
+        f"{ISSUE_PLAN_SYSTEM_PROMPT}\n\n"
+        f"Issue Number: {issue.get('number')}\n"
+        f"Issue Title: {issue.get('title')}\n"
+        f"Issue Body:\n{issue.get('body')}\n\n"
+        f"Repository Context:\n{context}\n"
+    )
+    output = _run_codex_text(prompt, repo_dir, config, logger)
+    if not output:
+        return None
+
+    body = output.strip()
+    if not body:
+        return None
+    return f"{ISSUE_PLAN_COMMENT_MARKER}\n{body}"
+
+
+def _ensure_issue_plan_comment(client, owner, repo_name, issue, context, repo_dir, config, logger):
+    issue_number = issue['number']
+    try:
+        comments = client.get_issue_comments(owner, repo_name, issue_number) or []
+        for comment in comments:
+            body = comment.get('body') or ""
+            if ISSUE_PLAN_COMMENT_MARKER in body:
+                logger.debug("Issue #%s already has a generated plan comment", issue_number)
+                return
+
+        plan_body = _generate_issue_plan(issue, context, repo_dir, config, logger)
+        if not plan_body:
+            logger.warning("No issue plan comment generated for issue #%s", issue_number)
+            return
+
+        client.create_issue_comment(owner, repo_name, issue_number, plan_body)
+        logger.info("Posted generated plan comment for issue #%s in %s/%s", issue_number, owner, repo_name)
+    except Exception as e:
+        logger.warning("Failed to post generated plan comment for issue #%s: %s", issue_number, e)
 
 
 def _generate_pr_summary(issue, base_branch, repo_dir, config, logger):
@@ -970,6 +1022,7 @@ def main():
 
     try:
         context_block = _build_context(repo_temp_dir, config, issue=issue)
+        _ensure_issue_plan_comment(client, owner, repo_name, issue, context_block, repo_temp_dir, config, logger)
         combined_prompt = f"{context_block}\n\n{issue['body']}" if context_block else issue['body']
         do_work(combined_prompt, repo_temp_dir, config, head_branch)
     except Exception as e:

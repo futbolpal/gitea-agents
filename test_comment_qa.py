@@ -6,6 +6,7 @@ from subagent import (
     _answer_comment_if_needed,
     _compose_pr_body,
     _create_or_update_issue_pr,
+    _ensure_issue_plan_comment,
     _parse_comment_classification,
 )
 
@@ -75,6 +76,56 @@ class TestCommentQA(unittest.TestCase):
     def test_compose_pr_body_omits_empty_issue_body(self):
         body = _compose_pr_body("## Summary\nBody", 7, None)
         self.assertEqual(body, "## Summary\nBody\n\nCloses #7")
+
+    @patch('subagent._run_codex_text', return_value="## Assessment\nUnderstands the issue.\n\n## Plan\n1. Inspect code.\n2. Implement fix.")
+    def test_ensure_issue_plan_comment_posts_generated_comment(self, mock_run_codex_text):
+        client = MagicMock()
+        client.get_issue_comments.return_value = []
+        config = SimpleNamespace(agent_cli='codex')
+        issue = {'number': 7, 'title': 'Broken flow', 'body': 'Issue details'}
+        logger = MagicMock()
+
+        _ensure_issue_plan_comment(
+            client,
+            'owner',
+            'repo',
+            issue,
+            'Context:\n- tech: python',
+            '/tmp/repo',
+            config,
+            logger,
+        )
+
+        mock_run_codex_text.assert_called_once()
+        client.create_issue_comment.assert_called_once()
+        body = client.create_issue_comment.call_args.args[3]
+        self.assertIn('<!-- kilo-agent-issue-plan -->', body)
+        self.assertIn('## Assessment', body)
+        self.assertIn('## Plan', body)
+
+    @patch('subagent._run_codex_text')
+    def test_ensure_issue_plan_comment_skips_existing_marker(self, mock_run_codex_text):
+        client = MagicMock()
+        client.get_issue_comments.return_value = [
+            {'id': 1, 'body': '<!-- kilo-agent-issue-plan -->\n## Assessment\nAlready posted'}
+        ]
+        config = SimpleNamespace(agent_cli='codex')
+        issue = {'number': 8, 'title': 'Existing plan', 'body': 'Issue details'}
+        logger = MagicMock()
+
+        _ensure_issue_plan_comment(
+            client,
+            'owner',
+            'repo',
+            issue,
+            'Context:\n- tech: python',
+            '/tmp/repo',
+            config,
+            logger,
+        )
+
+        mock_run_codex_text.assert_not_called()
+        client.create_issue_comment.assert_not_called()
 
     @patch('subagent._generate_pr_summary', return_value="## Summary\nGenerated")
     def test_create_or_update_issue_pr_updates_existing_pr_body_on_conflict(self, mock_summary):
