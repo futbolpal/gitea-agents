@@ -296,6 +296,7 @@ def _comment_merge_failure(client, owner, repo_name, pr_number, base_ref, confli
     client.create_pull_comment(owner, repo_name, pr_number, body)
 
 COMMENT_REPLY_MARKER = "<!-- kilo-agent -->"
+ISSUE_PLAN_COMMENT_MARKER = "<!-- kilo-agent-issue-plan -->"
 
 COMMENT_CLASSIFIER_SYSTEM_PROMPT = (
     "You are a PR comment triage assistant. Return JSON only. "
@@ -310,6 +311,14 @@ PR_SUMMARY_SYSTEM_PROMPT = (
     "You are generating a pull request summary. Output Markdown only. "
     "Include sections: Summary, Why, Testing. Be concise and factual. "
     "Do not mention internal agent tooling."
+)
+
+ISSUE_PLAN_SYSTEM_PROMPT = (
+    "You are reviewing a repository issue before implementation. Output Markdown only. "
+    "Include exactly two sections titled 'Assessment' and 'Plan'. "
+    "In Assessment, use a short flat bullet list. Each bullet should cover the problem, relevant code areas, or key uncertainty. "
+    "In Plan, provide a short numbered list of concrete implementation steps. "
+    "Do not claim work is already complete. Do not include code fences."
 )
 
 
@@ -461,6 +470,91 @@ def _compose_pr_body(summary, issue_number, issue_body):
     if body:
         parts.append(body)
     return "\n\n".join(part for part in parts if part)
+
+
+def _extract_issue_number_from_pr(pr):
+    if not isinstance(pr, dict):
+        return None
+
+    body = pr.get("body") or ""
+    match = re.search(r"\b(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+#(\d+)\b", body, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+
+    head_ref = pr.get("head", {}).get("ref") or ""
+    match = re.search(r"fix-issue-(\d+)", head_ref)
+    if match:
+        return int(match.group(1))
+
+    return None
+
+
+def _get_issue_plan_comment_body(client, owner, repo_name, issue_number, logger):
+    if not issue_number:
+        return None
+    try:
+        comments = client.get_issue_comments(owner, repo_name, issue_number) or []
+    except Exception as exc:
+        logger.warning("Failed to load issue comments for #%s: %s", issue_number, exc)
+        return None
+
+    for comment in reversed(comments):
+        body = (comment.get("body") or "").strip()
+        if ISSUE_PLAN_COMMENT_MARKER in body:
+            return body
+    return None
+
+
+def _format_issue_plan_context(plan_body):
+    if not plan_body:
+        return ""
+    cleaned = plan_body.replace(ISSUE_PLAN_COMMENT_MARKER, "", 1).strip()
+    if not cleaned:
+        return ""
+    return f"Issue Assessment And Plan:\n{cleaned}"
+
+
+def _generate_issue_plan(issue, context, repo_dir, config, logger):
+    if config.agent_cli != "codex":
+        logger.info("Skipping issue plan comment because AGENT_CLI=%s", config.agent_cli)
+        return None
+
+    prompt = (
+        f"{ISSUE_PLAN_SYSTEM_PROMPT}\n\n"
+        f"Issue Number: {issue.get('number')}\n"
+        f"Issue Title: {issue.get('title')}\n"
+        f"Issue Body:\n{issue.get('body')}\n\n"
+        f"Repository Context:\n{context}\n"
+    )
+    output = _run_codex_text(prompt, repo_dir, config, logger)
+    if not output:
+        return None
+
+    body = output.strip()
+    if not body:
+        return None
+    return f"{ISSUE_PLAN_COMMENT_MARKER}\n{body}"
+
+
+def _ensure_issue_plan_comment(client, owner, repo_name, issue, context, repo_dir, config, logger):
+    issue_number = issue['number']
+    try:
+        comments = client.get_issue_comments(owner, repo_name, issue_number) or []
+        for comment in comments:
+            body = comment.get('body') or ""
+            if ISSUE_PLAN_COMMENT_MARKER in body:
+                logger.debug("Issue #%s already has a generated plan comment", issue_number)
+                return
+
+        plan_body = _generate_issue_plan(issue, context, repo_dir, config, logger)
+        if not plan_body:
+            logger.warning("No issue plan comment generated for issue #%s", issue_number)
+            return
+
+        client.create_issue_comment(owner, repo_name, issue_number, plan_body)
+        logger.info("Posted generated plan comment for issue #%s in %s/%s", issue_number, owner, repo_name)
+    except Exception as e:
+        logger.warning("Failed to post generated plan comment for issue #%s: %s", issue_number, e)
 
 
 def _generate_pr_summary(issue, base_branch, repo_dir, config, logger):
@@ -720,6 +814,15 @@ def main():
                 sys.exit(0)
 
             logger.info("PR #%s is behind %s; attempting merge", pr_number, base_ref)
+            issue_plan_context = _format_issue_plan_context(
+                _get_issue_plan_comment_body(
+                    client,
+                    owner,
+                    repo_name,
+                    _extract_issue_number_from_pr(pr),
+                    logger,
+                )
+            )
             merge_result = _merge_base_into_head(repo_temp_dir, base_ref)
             if merge_result.returncode != 0:
                 conflicts = _merge_conflicts(repo_temp_dir)
@@ -728,6 +831,8 @@ def main():
                     f"Resolve merge conflicts after merging origin/{base_ref} into {head_branch}. "
                     "Only resolve conflict markers; do not change unrelated code."
                 )
+                if issue_plan_context:
+                    merge_prompt = f"{issue_plan_context}\n\n{merge_prompt}"
                 do_work(merge_prompt, repo_temp_dir, config, head_branch)
                 conflicts = _merge_conflicts(repo_temp_dir)
                 if conflicts:
@@ -840,6 +945,15 @@ def main():
             sys.exit(0)
 
         base_ref = pr.get('base', {}).get('ref')
+        issue_plan_context = _format_issue_plan_context(
+            _get_issue_plan_comment_body(
+                client,
+                owner,
+                repo_name,
+                _extract_issue_number_from_pr(pr),
+                logger,
+            )
+        )
         if base_ref:
             try:
                 if _branch_is_behind_base(repo_temp_dir, base_ref):
@@ -852,6 +966,8 @@ def main():
                             f"Resolve merge conflicts after merging origin/{base_ref} into {head_branch}. "
                             "Only resolve conflict markers; do not change unrelated code."
                         )
+                        if issue_plan_context:
+                            merge_prompt = f"{issue_plan_context}\n\n{merge_prompt}"
                         do_work(merge_prompt, repo_temp_dir, config, head_branch)
                         conflicts = _merge_conflicts(repo_temp_dir)
                         if conflicts:
@@ -883,7 +999,8 @@ def main():
                 'diff_hunk': comment.get('diff_hunk') if isinstance(comment, dict) else None,
             }
             context_block = _build_context(repo_temp_dir, config, pr=pr, comment=comment_context)
-            combined_prompt = f"{context_block}\n\n{prompt}" if context_block else prompt
+            prompt_parts = [part for part in [issue_plan_context, context_block, prompt] if part]
+            combined_prompt = "\n\n".join(prompt_parts)
             do_work(combined_prompt, repo_temp_dir, config, head_branch)
         except Exception as e:
             logger.error(f"Work failed: {e}")
@@ -970,7 +1087,11 @@ def main():
 
     try:
         context_block = _build_context(repo_temp_dir, config, issue=issue)
-        combined_prompt = f"{context_block}\n\n{issue['body']}" if context_block else issue['body']
+        _ensure_issue_plan_comment(client, owner, repo_name, issue, context_block, repo_temp_dir, config, logger)
+        issue_plan_context = _format_issue_plan_context(
+            _get_issue_plan_comment_body(client, owner, repo_name, issue_number, logger)
+        )
+        combined_prompt = "\n\n".join(part for part in [issue_plan_context, context_block, issue['body']] if part)
         do_work(combined_prompt, repo_temp_dir, config, head_branch)
     except Exception as e:
         logger.error(f"Work failed: {e}")

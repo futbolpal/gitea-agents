@@ -10,8 +10,6 @@ import sys
 from config import Config
 from gitea_client import GiteaClient
 
-ISSUE_PLAN_COMMENT_MARKER = "<!-- kilo-agent-issue-plan -->"
-
 def is_issue_completed(client, owner, repo_name, issue_number, config, logger):
     """Check if an issue is completed (has the in-review label)."""
     try:
@@ -130,37 +128,6 @@ def collect_finished_pids(active_subprocesses, logger):
 
 def spawn_subagent(args):
     return subprocess.Popen([sys.executable, 'subagent.py'] + args)
-
-def build_issue_plan_comment(issue):
-    title = (issue.get('title') or "").strip() or "Untitled issue"
-    body = (issue.get('body') or "").strip()
-    summary = body.splitlines()[0].strip() if body else "No additional issue details were provided."
-    return "\n".join([
-        ISSUE_PLAN_COMMENT_MARKER,
-        "Assessment:",
-        f"- Reviewing issue #{issue.get('number')}: {title}",
-        f"- Initial read: {summary}",
-        "- I will inspect the relevant code paths before changing behavior.",
-        "",
-        "Plan:",
-        "1. Identify the files and control flow involved in this issue.",
-        "2. Implement the change with focused tests where coverage is missing.",
-        "3. Verify the updated behavior and then open the PR.",
-    ])
-
-def ensure_issue_plan_comment(client, owner, repo_name, issue, logger):
-    issue_number = issue['number']
-    try:
-        comments = client.get_issue_comments(owner, repo_name, issue_number) or []
-        for comment in comments:
-            body = comment.get('body') or ""
-            if ISSUE_PLAN_COMMENT_MARKER in body:
-                logger.debug(f"Issue #{issue_number} already has a plan comment")
-                return
-        client.create_issue_comment(owner, repo_name, issue_number, build_issue_plan_comment(issue))
-        logger.info(f"Posted plan comment for issue #{issue_number} in {owner}/{repo_name}")
-    except Exception as e:
-        logger.warning(f"Failed to post plan comment for issue #{issue_number}: {e}")
 
 def main():
     os.environ['PROCESS_TYPE'] = 'main'
@@ -340,8 +307,6 @@ def main():
                             except Exception as e:
                                 logger.error(f"Failed to reserve issue {issue['number']}: {e}")
                                 continue
-
-                        ensure_issue_plan_comment(client, owner, repo_name, issue, logger)
 
                         # Spawn subagent
                         try:

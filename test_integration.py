@@ -179,72 +179,8 @@ class TestIntegration(unittest.TestCase):
         # Assertions
         # Should reserve the issue (cleanup not run in test)
         mock_client.update_issue_labels.assert_called_with('owner', 'repo', 1, ['agent-working'])
-        mock_client.get_issue_comments.assert_called_with('owner', 'repo', 1)
-        mock_client.create_issue_comment.assert_called_once()
-        comment_body = mock_client.create_issue_comment.call_args.args[3]
-        self.assertIn('<!-- kilo-agent-issue-plan -->', comment_body)
-        self.assertIn('Assessment:', comment_body)
-        self.assertIn('Plan:', comment_body)
         # Should spawn subagent
         mock_popen.assert_called_with([sys.executable, 'subagent.py', '--issue', '1', 'owner/repo'])
-
-    @patch('subprocess.Popen')
-    @patch('main.time.sleep')
-    @patch('main.GiteaClient')
-    def test_issue_plan_comment_not_duplicated(self, mock_gitea_client_class, mock_sleep, mock_popen):
-        """Test that an existing plan comment is reused."""
-        from main import main
-        from unittest.mock import MagicMock
-
-        mock_client = MagicMock()
-        mock_gitea_client_class.return_value = mock_client
-        mock_client.get_issues.return_value = [{
-            'number': 2,
-            'title': 'Existing plan',
-            'body': 'Do the thing',
-            'labels': [{'name': 'agent-working'}],
-        }]
-        mock_client.get_issue.side_effect = [{
-            'number': 2,
-            'title': 'Existing plan',
-            'body': 'Do the thing',
-            'labels': [{'name': 'agent-working'}],
-        }]
-        mock_client.get_issue_comments.return_value = [{
-            'id': 9,
-            'body': '<!-- kilo-agent-issue-plan -->\nAssessment:\n- already posted',
-        }]
-        mock_client.get_pulls.return_value = []
-
-        mock_proc = MagicMock()
-        mock_proc.pid = 456
-        mock_proc.poll.return_value = 0
-        mock_proc.returncode = 0
-        mock_popen.return_value = mock_proc
-
-        with patch('main.Config') as mock_config_class:
-            mock_config = MagicMock()
-            mock_config.gitea_repos = ['owner/repo']
-            mock_config.issue_label_reserve = 'agent-working'
-            mock_config.issue_label_in_review = 'agent-in-review'
-            mock_config.polling_frequency = 1
-            mock_config.max_concurrent_subagents = 10
-            mock_config.data_dir = self.temp_dir
-            mock_config.workspace_dir = self.temp_dir
-            mock_config_class.return_value = mock_config
-
-            with patch('main.logging') as mock_logging:
-                mock_logger = MagicMock()
-                mock_logging.getLogger.return_value = mock_logger
-
-                with patch('main.signal.signal'), patch('main.atexit.register'), patch('main.os.path.exists', return_value=False), patch('main.time.sleep', side_effect=KeyboardInterrupt):
-                    try:
-                        main()
-                    except KeyboardInterrupt:
-                        pass
-
-        mock_client.create_issue_comment.assert_not_called()
-        mock_popen.assert_called_with([sys.executable, 'subagent.py', '--issue', '2', 'owner/repo'])
 
     @patch('subprocess.Popen')
     @patch('main.time.sleep')
