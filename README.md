@@ -1,12 +1,14 @@
-# Kilocode Agent for Gitea
+# Gitea Agents
 
-An autonomous agent that monitors Gitea repositories for issues, automatically generates code solutions using the kilocode AI tool, and creates pull requests for review.  
+Gitea Agents is an autonomous worker for Gitea repositories. It monitors configured repositories for issues and pull request activity, spawns focused subagents, generates code changes with either `kilocode` or `codex`, opens or updates pull requests, and responds to review feedback.
 
-Comment on the resulting PR or add review comments to iterate.  The agent will respond to your feedback and update the PR!
+Comment on an agent-created pull request or leave review comments to iterate. The agent will pick up that feedback, update the branch, and continue the PR conversation.
+
+Some implementation details and operational names still use the older `kilo-agents` naming, including the current image tag and default log filename.
 
 ## Architecture
 
-The system consists of three main components:
+The runtime has three primary pieces:
 
 ```
 ┌─────────────┐
@@ -14,44 +16,55 @@ The system consists of three main components:
 └──────┬──────┘
        │
 ┌──────▼──────┐
-│ Main Agent  │
+│ Orchestrator│
 │  (main.py)  │
 └──────┬──────┘
-       │ Polls for open issues
-       │ Reserves issues with labels
-       │ Spawns subagents
+       │ Polls issues, PRs, and comments
+       │ Applies reservation/review reactions
+       │ Spawns focused subagents
 ┌──────▼──────┐
 │ Subagent    │
-│ (subagent.py│
-│   process)  │
+│ (subagent.py)
 └──────┬──────┘
-       │ Clones repo
-       │ Generates code with kilocode
-       │ Commits & pushes changes
-       │ Creates PR
-       │ Monitors PR comments
-       │ Responds to feedback
+       │ Clones the target repo
+       │ Builds repo-aware prompts
+       │ Runs kilocode or codex
+       │ Commits, pushes, comments, updates PRs
 ┌──────▼──────┐
-│   Gitea     │
-│ Repository  │
-│   & PRs     │
+│ Repo / PR / │
+│ Issue State │
 └─────────────┘
 ```
 
-**Control Flow:**
-1. Main agent polls Gitea API for open issues
-2. Filters qualifying issues (no reserve/acceptance labels)
-3. Reserves issue by adding label
-4. Spawns subagent subprocess
-5. Subagent clones repo, generates code, creates PR
-6. Subagent monitors PR for comments and responds
-7. Main agent monitors for merged PRs and cleans up
+**Orchestrator responsibilities**
+
+- Poll configured repositories for open issues, open pull requests, and new PR comments or review comments.
+- Reserve issues with labels before work starts.
+- Mark comments in progress with reactions and avoid duplicate workers for the same work item.
+- Spawn subagents for issue implementation, PR feedback handling, and stale PR updates.
+- Track active subprocesses and retry failed work items when appropriate.
+
+**Subagent responsibilities**
+
+- Clone the target repository into a temporary workspace and check out the relevant branch.
+- For issue work, generate and post an `Assessment` and `Plan` comment before implementation when `AGENT_CLI=codex`.
+- Generate or update code using the configured coding CLI: `kilocode` or `codex`.
+- Open or update pull requests for issue work.
+- Respond to PR comments and review comments, including code changes when needed.
+- Attempt stale PR updates and merge-conflict resolution, and comment when conflicts cannot be resolved automatically.
+
+**Work item types**
+
+- `--issue`: implement an issue in a fresh branch and create or update a PR.
+- `--comment`: answer or act on a PR comment or review comment against the PR branch.
+- `--update-pr`: refresh a stale PR branch against its base branch.
 
 ## Prerequisites
 
 - Docker
 - Gitea instance with API access
 - Valid Gitea token with repo and issue permissions
+- At least one supported coding CLI: `kilocode` or `codex`
 
 ## Configuration
 
@@ -62,9 +75,11 @@ Set the following environment variables:
 - `GITEA_REPOS`: Comma-separated list of repositories to monitor (e.g., `owner/repo1,owner/repo2`)
 - `POLLING_FREQUENCY`: Polling interval in seconds (default: 60)
 - `ISSUE_LABEL_RESERVE`: Label for reserving issues (default: `agent-working`)
+- `ISSUE_LABEL_IN_REVIEW`: Label for issues that already have an open PR (default: `agent-in-review`)
 - `LOG_LEVEL`: Logging level (default: `INFO`)
 - `LOG_FILE`: Log file path (default: `kilocode_agent.log`)
-- `AGENT_CLI`: Which CLI to run for code generation (`kilocode` or `codex`, default: `kilocode`)
+- `MAX_CONCURRENT_SUBAGENTS`: Max number of active subagents at once (default: `3`)
+- `AGENT_CLI`: Which coding CLI to use for code generation (`kilocode` or `codex`, default: `kilocode`)
 - `KILOCODE_ARGS`: Override kilocode CLI args (default: `-a -m orchestrator -j`)
 - `CODEX_EXEC_ARGS`: Override codex exec args (default: `--full-auto`)
 - `CODEX_PROMPT_MODE`: How to pass prompts to codex (`stdin` or `arg`, default: `stdin`)
@@ -95,6 +110,8 @@ Set the following environment variables:
    podman run -e GITEA_BASE_URL=... -e GITEA_TOKEN=... -e GITEA_REPOS=... homenas.tail38254.ts.net:5001/kilo-agents:latest
    ```
 
+The image name is still `kilo-agents` today even though the project name is now Gitea Agents.
+
 ### Local Development
 
 1. Install dependencies:
@@ -102,11 +119,11 @@ Set the following environment variables:
    pip install -r requirements.txt
    ```
 
-2. Install kilocode CLI:
+2. Install `kilocode` if you want to run with `AGENT_CLI=kilocode`:
    ```bash
    curl -fsSL https://kilo.ai/install.sh | sh
    ```
-3. (Optional) Install Codex CLI:
+3. Install Codex CLI if you want to run with `AGENT_CLI=codex`:
    ```bash
    npm install -g @openai/codex@0.112.0
    ```
@@ -116,7 +133,7 @@ Set the following environment variables:
    python main.py
    ```
 
-To use Codex CLI for code generation, set `AGENT_CLI=codex`.
+To use Codex for code generation, set `AGENT_CLI=codex`. To stay on Kilocode, leave the default or set `AGENT_CLI=kilocode`.
 
 ## Codex on a Headless Server
 
@@ -163,15 +180,19 @@ Run the live PR comment Q&A E2E against `futbolpal/kilo-agents-test`:
 RUN_LIVE_GITEA_E2E=1 python3 -m unittest e2e.test_live_comment_qa_e2e
 ```
 
-The test checks:
+The integration test checks:
 - Configuration validation
 - Gitea API connectivity
 - Repository access
 - Label creation
 
+The live E2E tests exercise:
+- PR comment Q&A handling
+- Issue assessment/plan comment generation against `futbolpal/kilo-agents-test`
+
 ## Logging
 
-Logs are written to `kilocode_agent.log` with the format:
+Logs are written to `kilocode_agent.log` by default with the format:
 ```
 timestamp - [process_type] - level - message
 ```
@@ -181,7 +202,8 @@ Where `process_type` is either `main` or `subagent` to distinguish log sources.
 ## Labels
 
 The agent uses the following labels:
-- `ISSUE_LABEL_RESERVE`: Applied to issues being worked on by subagents
+- `ISSUE_LABEL_RESERVE`: Applied when an issue is actively being worked on.
+- `ISSUE_LABEL_IN_REVIEW`: Applied after issue work has produced a PR.
 
 ## Security Notes
 
