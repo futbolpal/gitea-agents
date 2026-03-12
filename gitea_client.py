@@ -119,6 +119,12 @@ class GiteaClient:
         logger.debug(f"Getting comments for PR #{pull_number} in {owner}/{repo}")
         return self._make_request('GET', url)
 
+    def get_issue_comments(self, owner, repo, issue_number):
+        """Get comments on an issue."""
+        url = f'{self.base_url}/repos/{owner}/{repo}/issues/{issue_number}/comments'
+        logger.debug(f"Getting comments for issue #{issue_number} in {owner}/{repo}")
+        return self._make_request('GET', url)
+
     def get_pull_request(self, owner, repo, pull_number):
         """Get a specific pull request."""
         url = f'{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}'
@@ -136,6 +142,13 @@ class GiteaClient:
         url = f'{self.base_url}/repos/{owner}/{repo}/issues/{pull_number}/comments'
         data = {'body': body}
         logger.info(f"Creating comment on PR #{pull_number} in {owner}/{repo}")
+        return self._make_request('POST', url, json=data)
+
+    def create_issue_comment(self, owner, repo, issue_number, body):
+        """Create a comment on an issue."""
+        url = f'{self.base_url}/repos/{owner}/{repo}/issues/{issue_number}/comments'
+        data = {'body': body}
+        logger.info(f"Creating comment on issue #{issue_number} in {owner}/{repo}")
         return self._make_request('POST', url, json=data)
 
     def create_pull_review_comment(self, owner, repo, pull_number, body, path=None, position=None):
