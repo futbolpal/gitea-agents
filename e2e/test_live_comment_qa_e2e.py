@@ -20,7 +20,8 @@ def _load_env_file(path):
         os.environ.setdefault(key, value)
 
 
-_load_env_file(Path(__file__).resolve().parents[1] / ".env")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+_load_env_file(REPO_ROOT / ".env")
 
 
 @unittest.skipUnless(os.getenv("RUN_LIVE_GITEA_E2E") == "1", "set RUN_LIVE_GITEA_E2E=1 to run live Gitea e2e")
@@ -94,7 +95,7 @@ class TestLiveCommentQaE2E(unittest.TestCase):
         env["WORKSPACE_DIR"] = os.path.join(self.temp_root, "workspace")
         env["LOG_FILE"] = os.path.join(self.temp_root, "data", "kilo-agents.log")
         env["HOME"] = os.path.join(self.temp_root, "home")
-        env["CODEX_HOME"] = os.environ.get("CODEX_HOME", str(Path(__file__).resolve().parents[2] / ".codex"))
+        env["CODEX_HOME"] = os.environ.get("CODEX_HOME", str(REPO_ROOT / ".codex"))
         env["AGENT_CLI"] = "codex"
         env["CODEX_EXEC_ARGS"] = os.environ.get("CODEX_EXEC_ARGS", "--dangerously-bypass-approvals-and-sandbox")
         os.makedirs(env["DATA_DIR"], exist_ok=True)
@@ -111,7 +112,7 @@ class TestLiveCommentQaE2E(unittest.TestCase):
                 str(self.pr_number),
                 "pr_comment",
             ],
-            cwd=Path(__file__).resolve().parents[0],
+            cwd=REPO_ROOT,
             env=env,
             check=True,
         )
