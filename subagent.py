@@ -454,6 +454,15 @@ def _fallback_pr_summary(diffstat, files_changed):
     return "\n".join(lines)
 
 
+def _compose_pr_body(summary, issue_number, issue_body):
+    parts = [summary.strip() if summary else ""]
+    parts.append(f"Closes #{issue_number}")
+    body = (issue_body or "").strip()
+    if body:
+        parts.append(body)
+    return "\n\n".join(part for part in parts if part)
+
+
 def _generate_pr_summary(issue, base_branch, repo_dir, config, logger):
     diffstat = subprocess.run(
         ["git", "diff", "--stat", f"origin/{base_branch}...HEAD"],
@@ -484,6 +493,54 @@ def _generate_pr_summary(issue, base_branch, repo_dir, config, logger):
         if output:
             return output.strip()
     return _fallback_pr_summary(diffstat, files_changed)
+
+
+def _create_or_update_issue_pr(
+    client,
+    owner,
+    repo_name,
+    issue,
+    issue_number,
+    head_branch,
+    default_branch,
+    repo_dir,
+    config,
+    logger,
+):
+    title = f"Fix issue #{issue_number}: {issue['title']}"
+    summary = _generate_pr_summary(issue, default_branch, repo_dir, config, logger)
+    pr_body = _compose_pr_body(summary, issue_number, issue.get('body'))
+
+    try:
+        return client.create_pull_request(
+            owner,
+            repo_name,
+            title,
+            head_branch,
+            default_branch,
+            pr_body,
+        )
+    except Exception as e:
+        message = str(e)
+        if "pull request already exists" not in message and "API Error 409" not in message:
+            raise
+
+    prs = client.get_pulls(owner, repo_name, state='open')
+    match = next((pr for pr in prs if pr.get('head', {}).get('ref') == head_branch), None)
+    if not match:
+        raise Exception(f"Existing PR for head {head_branch} not found after conflict")
+
+    pr_number = match.get('number')
+    client.update_pull_request(
+        owner,
+        repo_name,
+        pr_number,
+        title=title,
+        body=pr_body,
+        base=default_branch,
+    )
+    logger.info("Updated existing PR #%s for head %s", pr_number, head_branch)
+    return match
 
 def _load_prompt_template(config):
     default_template = (
@@ -955,32 +1012,21 @@ def main():
         try:
             logger.debug(f"Creating PR with head={head_branch}")
             logger.info(f"Using default branch: {default_branch}")
-            summary = _generate_pr_summary(issue, default_branch, repo_temp_dir, config, logger)
-            pr_body = f"{summary}\n\nCloses #{issue_number}\n\n{issue['body']}"
-            pr = client.create_pull_request(
-                owner, repo_name,
-                f"Fix issue #{issue_number}: {issue['title']}",
+            pr = _create_or_update_issue_pr(
+                client,
+                owner,
+                repo_name,
+                issue,
+                issue_number,
                 head_branch,
                 default_branch,
-                pr_body
+                repo_temp_dir,
+                config,
+                logger,
             )
             pr_number = pr['number']
-            logger.info(f"Created PR #{pr_number} for issue {issue_number}")
-            logger.info(f"Subagent completed work for issue {issue_number}, PR #{pr_number} created")
+            logger.info(f"Subagent completed work for issue {issue_number}, PR #{pr_number} ready")
         except Exception as e:
-            message = str(e)
-            if "pull request already exists" in message or "API Error 409" in message:
-                try:
-                    prs = client.get_pulls(owner, repo_name, state='open')
-                    match = next((pr for pr in prs if pr.get('head', {}).get('ref') == head_branch), None)
-                    if match:
-                        pr_number = match.get('number')
-                        logger.info(f"PR already exists for head {head_branch}: #{pr_number}")
-                        logger.info(f"Subagent completed work for issue {issue_number}, PR #{pr_number} already exists")
-                        sys.exit(0)
-                except Exception as fetch_error:
-                    logger.error(f"Failed to locate existing PR for {head_branch}: {fetch_error}")
-
             logger.error(f"Failed to create PR for issue {issue_number}: {e}")
             sys.exit(1)
     else:

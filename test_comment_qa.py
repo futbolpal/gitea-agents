@@ -1,7 +1,13 @@
 import unittest
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
-from subagent import _answer_comment_if_needed, _parse_comment_classification
+from subagent import (
+    _answer_comment_if_needed,
+    _compose_pr_body,
+    _create_or_update_issue_pr,
+    _parse_comment_classification,
+)
 
 
 class TestCommentQA(unittest.TestCase):
@@ -65,6 +71,44 @@ class TestCommentQA(unittest.TestCase):
         self.assertEqual(classification, "both")
         client.create_pull_review_comment.assert_called_once()
         client.create_pull_comment.assert_called_once()
+
+    def test_compose_pr_body_omits_empty_issue_body(self):
+        body = _compose_pr_body("## Summary\nBody", 7, None)
+        self.assertEqual(body, "## Summary\nBody\n\nCloses #7")
+
+    @patch('subagent._generate_pr_summary', return_value="## Summary\nGenerated")
+    def test_create_or_update_issue_pr_updates_existing_pr_body_on_conflict(self, mock_summary):
+        client = MagicMock()
+        client.create_pull_request.side_effect = Exception("API Error 409: pull request already exists")
+        client.get_pulls.return_value = [
+            {'number': 42, 'head': {'ref': 'fix-issue-7'}}
+        ]
+        logger = MagicMock()
+        config = SimpleNamespace(agent_cli='kilocode')
+        issue = {'title': 'Broken flow', 'body': 'Issue details'}
+
+        pr = _create_or_update_issue_pr(
+            client,
+            'owner',
+            'repo',
+            issue,
+            7,
+            'fix-issue-7',
+            'main',
+            '/tmp/repo',
+            config,
+            logger,
+        )
+
+        self.assertEqual(pr['number'], 42)
+        client.update_pull_request.assert_called_once_with(
+            'owner',
+            'repo',
+            42,
+            title='Fix issue #7: Broken flow',
+            body='## Summary\nGenerated\n\nCloses #7\n\nIssue details',
+            base='main',
+        )
 
 
 if __name__ == '__main__':
