@@ -301,10 +301,18 @@ ISSUE_PLAN_COMMENT_MARKER = "<!-- kilo-agent-issue-plan -->"
 COMMENT_CLASSIFIER_SYSTEM_PROMPT = (
     "You are a PR comment triage assistant. Return JSON only. "
     "Schema: {\"classification\": \"question\"|\"action\"|\"both\"|\"ignore\", "
-    "\"answer\": string, \"reason\": string}. "
-    "If classification is action or ignore, answer must be empty. "
-    "If classification is question or both, provide a concise answer using the supplied repository and PR context. "
-    "If unclear, ask a short clarification question in the answer."
+    "\"reason\": string}. "
+    "Classify whether the comment needs an answer, code changes, both, or neither. "
+    "Do not answer the comment. Keep reason brief."
+)
+
+COMMENT_ANSWER_SYSTEM_PROMPT = (
+    "You are answering a pull request comment. Output Markdown only. "
+    "Use the checked out repository and current PR branch as your source of truth. "
+    "Inspect files, git diff, and repository history as needed to answer accurately. "
+    "Be concise, direct, and specific to the actual changes. "
+    "Do not include local filesystem paths or links to local files. "
+    "Do not mention internal tooling or say that you cannot inspect the repository."
 )
 
 PR_SUMMARY_SYSTEM_PROMPT = (
@@ -340,13 +348,10 @@ def _parse_comment_classification(text):
     if not isinstance(data, dict):
         return None
     classification = data.get("classification")
-    answer = (data.get("answer") or "").strip()
     reason = (data.get("reason") or "").strip()
     if classification not in ("question", "action", "both", "ignore"):
         return None
-    if classification in ("action", "ignore"):
-        answer = ""
-    return {"classification": classification, "answer": answer, "reason": reason}
+    return {"classification": classification, "reason": reason}
 
 
 def _git_porcelain(repo_dir):
@@ -401,7 +406,7 @@ def _classify_comment(comment_body, context, repo_dir, config, logger):
     return parsed
 
 
-def _build_pr_answer_context(repo_dir, pr):
+def _build_pr_comment_context(pr, review_context="", issue_plan_context=""):
     if not isinstance(pr, dict):
         return ""
 
@@ -418,26 +423,42 @@ def _build_pr_answer_context(repo_dir, pr):
     if base_ref or head_ref:
         parts.append(f"- branches: {head_ref} -> {base_ref}")
 
-    if base_ref:
-        diffstat = _safe_run(["git", "diff", "--stat", f"origin/{base_ref}...HEAD"], repo_dir)
-        if diffstat:
-            parts.append("- diffstat:")
-            parts.append(diffstat)
-
-        files_changed = _safe_run(["git", "diff", "--name-only", f"origin/{base_ref}...HEAD"], repo_dir)
-        if files_changed:
-            parts.append("- files_changed:")
-            parts.append(files_changed)
-
     body = (pr.get("body") or "").strip()
     if body:
         parts.append("- pr_body:")
         parts.append(body)
 
+    if review_context:
+        parts.append("- comment_context:")
+        parts.append(review_context.strip())
+
+    if issue_plan_context:
+        parts.append(issue_plan_context.strip())
+
     return "\n".join(parts).strip()
 
 
-def _answer_comment_if_needed(
+def _generate_comment_answer(comment_body, pr_context, repo_dir, config, logger):
+    prompt = (
+        f"{COMMENT_ANSWER_SYSTEM_PROMPT}\n\n"
+        "Comment:\n"
+        f"{comment_body}\n\n"
+        "PR Context:\n"
+        f"{pr_context}\n"
+    )
+    output = _run_codex_text(prompt, repo_dir, config, logger)
+    if not output:
+        return None
+    return output.strip() or None
+
+
+def _sanitize_comment_answer(answer):
+    if not answer:
+        return answer
+    return re.sub(r"\[([^\]]+)\]\(((?:file://)?/[^)]+)\)", r"`\1`", answer)
+
+
+def _post_comment_answer(
     client,
     owner,
     repo_name,
@@ -447,23 +468,22 @@ def _answer_comment_if_needed(
     position,
     comment_id,
     original_comment_body,
-    analysis,
+    answer,
     logger,
 ):
-    if not analysis:
+    if not answer:
         return None
 
-    classification = analysis.get("classification")
-    answer = analysis.get("answer", "").strip()
-    if classification not in ("question", "both") or not answer:
-        return classification
+    sanitized_answer = _sanitize_comment_answer(answer).strip()
+    if not sanitized_answer:
+        return None
 
     quoted_comment = (original_comment_body or "").strip()
     response_parts = [COMMENT_REPLY_MARKER]
     if quoted_comment:
         response_parts.append("Addressing:")
         response_parts.append(f"> {quoted_comment.replace(chr(10), chr(10) + '> ')}")
-    response_parts.append(answer)
+    response_parts.append(sanitized_answer)
     response_body = "\n\n".join(response_parts)
     if comment_type == "review_comment" and path and position is not None:
         try:
@@ -476,14 +496,14 @@ def _answer_comment_if_needed(
                 position=position,
             )
             logger.info("Posted inline answer on PR #%s", pr_number)
-            logger.info("Answered comment %s as %s", comment_id, classification)
-            return classification
+            logger.info("Answered comment %s", comment_id)
+            return True
         except Exception as e:
             logger.warning("Inline reply failed, falling back to PR comment: %s", e)
 
     client.create_pull_comment(owner, repo_name, pr_number, response_body)
-    logger.info("Answered comment %s as %s", comment_id, classification)
-    return classification
+    logger.info("Answered comment %s", comment_id)
+    return True
 
 
 def _fallback_pr_summary(diffstat, files_changed):
@@ -967,23 +987,35 @@ def main():
 
         classification = None
         if config.agent_cli == "codex":
-            pr_answer_context = _build_pr_answer_context(repo_temp_dir, pr)
-            combined_answer_context = "\n\n".join(part for part in [pr_answer_context, context] if part)
-            analysis = _classify_comment(body, combined_answer_context, repo_temp_dir, config, logger)
-            if analysis:
-                classification = _answer_comment_if_needed(
+            issue_plan_context = _format_issue_plan_context(
+                _get_issue_plan_comment_body(
                     client,
                     owner,
                     repo_name,
-                    pr_number,
-                    comment_type,
-                    path,
-                    position,
-                    comment_id,
-                    body,
-                    analysis,
+                    _extract_issue_number_from_pr(pr),
                     logger,
                 )
+            )
+            analysis = _classify_comment(body, context, repo_temp_dir, config, logger)
+            if analysis:
+                classification = analysis.get("classification")
+                if classification in ("question", "both"):
+                    pr_context = _build_pr_comment_context(pr, context, issue_plan_context)
+                    answer = _generate_comment_answer(body, pr_context, repo_temp_dir, config, logger)
+                    if answer:
+                        _post_comment_answer(
+                            client,
+                            owner,
+                            repo_name,
+                            pr_number,
+                            comment_type,
+                            path,
+                            position,
+                            comment_id,
+                            body,
+                            answer,
+                            logger,
+                        )
 
         if classification == "question":
             logger.info("Comment classified as question only; skipping code changes")

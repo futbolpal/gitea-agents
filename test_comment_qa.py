@@ -3,40 +3,41 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from subagent import (
-    _answer_comment_if_needed,
-    _build_pr_answer_context,
+    _build_pr_comment_context,
     _compose_pr_body,
     _create_or_update_issue_pr,
     _ensure_issue_plan_comment,
     _extract_issue_number_from_pr,
     _format_issue_plan_context,
+    _generate_comment_answer,
     _get_issue_plan_comment_body,
+    _post_comment_answer,
     _parse_comment_classification,
+    _sanitize_comment_answer,
 )
 
 
 class TestCommentQA(unittest.TestCase):
     def test_parse_question(self):
-        text = '{"classification": "question", "answer": "Answer", "reason": "Asked"}'
+        text = '{"classification": "question", "reason": "Asked"}'
         parsed = _parse_comment_classification(text)
         self.assertEqual(parsed["classification"], "question")
-        self.assertEqual(parsed["answer"], "Answer")
+        self.assertEqual(parsed["reason"], "Asked")
 
     def test_parse_action(self):
-        text = '{"classification": "action", "answer": "No", "reason": "Fix"}'
+        text = '{"classification": "action", "reason": "Fix"}'
         parsed = _parse_comment_classification(text)
         self.assertEqual(parsed["classification"], "action")
-        self.assertEqual(parsed["answer"], "")
+        self.assertEqual(parsed["reason"], "Fix")
 
     def test_parse_invalid(self):
         self.assertIsNone(_parse_comment_classification("not json"))
 
-    def test_answer_comment_if_needed_posts_pr_comment(self):
+    def test_post_comment_answer_posts_pr_comment(self):
         client = MagicMock()
         logger = MagicMock()
-        analysis = {"classification": "question", "answer": "Because it validates the PR.", "reason": "question"}
 
-        classification = _answer_comment_if_needed(
+        posted = _post_comment_answer(
             client,
             "owner",
             "repo",
@@ -46,11 +47,11 @@ class TestCommentQA(unittest.TestCase):
             None,
             101,
             "What does this PR change?",
-            analysis,
+            "Because it validates the PR.",
             logger,
         )
 
-        self.assertEqual(classification, "question")
+        self.assertTrue(posted)
         client.create_pull_comment.assert_called_once()
         body = client.create_pull_comment.call_args.args[3]
         self.assertIn("<!-- kilo-agent -->", body)
@@ -58,13 +59,12 @@ class TestCommentQA(unittest.TestCase):
         self.assertIn("> What does this PR change?", body)
         self.assertIn("Because it validates the PR.", body)
 
-    def test_answer_comment_if_needed_inline_falls_back(self):
+    def test_post_comment_answer_inline_falls_back(self):
         client = MagicMock()
         client.create_pull_review_comment.side_effect = Exception("boom")
         logger = MagicMock()
-        analysis = {"classification": "both", "answer": "Answer text", "reason": "mixed"}
 
-        classification = _answer_comment_if_needed(
+        posted = _post_comment_answer(
             client,
             "owner",
             "repo",
@@ -74,19 +74,24 @@ class TestCommentQA(unittest.TestCase):
             3,
             102,
             "Can you explain this line?",
-            analysis,
+            "Answer text",
             logger,
         )
 
-        self.assertEqual(classification, "both")
+        self.assertTrue(posted)
         client.create_pull_review_comment.assert_called_once()
         client.create_pull_comment.assert_called_once()
+
+    def test_sanitize_comment_answer_removes_local_file_links(self):
+        answer = "This PR changes [README.md](/tmp/worktree/README.md) and [notes](file:///tmp/worktree/notes.txt)."
+        sanitized = _sanitize_comment_answer(answer)
+        self.assertEqual(sanitized, "This PR changes `README.md` and `notes`.")
 
     def test_compose_pr_body_omits_empty_issue_body(self):
         body = _compose_pr_body("## Summary\nBody", 7, None)
         self.assertEqual(body, "## Summary\nBody\n\nCloses #7")
 
-    def test_build_pr_answer_context_includes_diff_and_files(self):
+    def test_build_pr_comment_context_includes_pr_metadata(self):
         pr = {
             "number": 12,
             "title": "Add marker",
@@ -94,18 +99,36 @@ class TestCommentQA(unittest.TestCase):
             "base": {"ref": "main"},
             "head": {"ref": "feature"},
         }
-        with patch('subagent._safe_run') as mock_safe_run:
-            mock_safe_run.side_effect = [
-                " README.md | 2 ++\n 1 file changed, 2 insertions(+)",
-                "README.md",
-            ]
-            context = _build_pr_answer_context("/tmp/repo", pr)
+        context = _build_pr_comment_context(
+            pr,
+            "on README.md at line 3",
+            "Issue Assessment And Plan:\n## Assessment\n- relevant area",
+        )
 
         self.assertIn("PR Summary Context:", context)
         self.assertIn("- pr: #12 Add marker", context)
-        self.assertIn("- diffstat:", context)
-        self.assertIn("- files_changed:", context)
-        self.assertIn("README.md", context)
+        self.assertIn("- branches: feature -> main", context)
+        self.assertIn("- comment_context:", context)
+        self.assertIn("on README.md at line 3", context)
+        self.assertIn("Issue Assessment And Plan:", context)
+
+    @patch('subagent._run_codex_text', return_value="This PR updates README.md to add the marker for validation.")
+    def test_generate_comment_answer_uses_repo_aware_prompt(self, mock_run_codex_text):
+        logger = MagicMock()
+        config = SimpleNamespace(agent_cli='codex')
+        answer = _generate_comment_answer(
+            "What does this PR change?",
+            "PR Summary Context:\n- pr: #12 Add marker",
+            "/tmp/repo",
+            config,
+            logger,
+        )
+
+        self.assertEqual(answer, "This PR updates README.md to add the marker for validation.")
+        prompt = mock_run_codex_text.call_args.args[0]
+        self.assertIn("Inspect files, git diff, and repository history as needed", prompt)
+        self.assertIn("What does this PR change?", prompt)
+        self.assertIn("PR Summary Context:", prompt)
 
     def test_extract_issue_number_from_pr_prefers_closes_reference(self):
         pr = {
