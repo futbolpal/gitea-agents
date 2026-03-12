@@ -303,7 +303,7 @@ COMMENT_CLASSIFIER_SYSTEM_PROMPT = (
     "Schema: {\"classification\": \"question\"|\"action\"|\"both\"|\"ignore\", "
     "\"answer\": string, \"reason\": string}. "
     "If classification is action or ignore, answer must be empty. "
-    "If classification is question or both, provide a concise answer based only on the comment text. "
+    "If classification is question or both, provide a concise answer using the supplied repository and PR context. "
     "If unclear, ask a short clarification question in the answer."
 )
 
@@ -401,6 +401,42 @@ def _classify_comment(comment_body, context, repo_dir, config, logger):
     return parsed
 
 
+def _build_pr_answer_context(repo_dir, pr):
+    if not isinstance(pr, dict):
+        return ""
+
+    parts = []
+    pr_number = pr.get("number")
+    title = (pr.get("title") or "").strip()
+    if pr_number and title:
+        parts.append(f"PR Summary Context:\n- pr: #{pr_number} {title}")
+    elif pr_number:
+        parts.append(f"PR Summary Context:\n- pr: #{pr_number}")
+
+    base_ref = pr.get("base", {}).get("ref")
+    head_ref = pr.get("head", {}).get("ref")
+    if base_ref or head_ref:
+        parts.append(f"- branches: {head_ref} -> {base_ref}")
+
+    if base_ref:
+        diffstat = _safe_run(["git", "diff", "--stat", f"origin/{base_ref}...HEAD"], repo_dir)
+        if diffstat:
+            parts.append("- diffstat:")
+            parts.append(diffstat)
+
+        files_changed = _safe_run(["git", "diff", "--name-only", f"origin/{base_ref}...HEAD"], repo_dir)
+        if files_changed:
+            parts.append("- files_changed:")
+            parts.append(files_changed)
+
+    body = (pr.get("body") or "").strip()
+    if body:
+        parts.append("- pr_body:")
+        parts.append(body)
+
+    return "\n".join(parts).strip()
+
+
 def _answer_comment_if_needed(
     client,
     owner,
@@ -410,6 +446,7 @@ def _answer_comment_if_needed(
     path,
     position,
     comment_id,
+    original_comment_body,
     analysis,
     logger,
 ):
@@ -421,7 +458,13 @@ def _answer_comment_if_needed(
     if classification not in ("question", "both") or not answer:
         return classification
 
-    response_body = f"{COMMENT_REPLY_MARKER}\n{answer}"
+    quoted_comment = (original_comment_body or "").strip()
+    response_parts = [COMMENT_REPLY_MARKER]
+    if quoted_comment:
+        response_parts.append("Addressing:")
+        response_parts.append(f"> {quoted_comment.replace(chr(10), chr(10) + '> ')}")
+    response_parts.append(answer)
+    response_body = "\n\n".join(response_parts)
     if comment_type == "review_comment" and path and position is not None:
         try:
             client.create_pull_review_comment(
@@ -924,7 +967,9 @@ def main():
 
         classification = None
         if config.agent_cli == "codex":
-            analysis = _classify_comment(body, context, repo_temp_dir, config, logger)
+            pr_answer_context = _build_pr_answer_context(repo_temp_dir, pr)
+            combined_answer_context = "\n\n".join(part for part in [pr_answer_context, context] if part)
+            analysis = _classify_comment(body, combined_answer_context, repo_temp_dir, config, logger)
             if analysis:
                 classification = _answer_comment_if_needed(
                     client,
@@ -935,6 +980,7 @@ def main():
                     path,
                     position,
                     comment_id,
+                    body,
                     analysis,
                     logger,
                 )

@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from subagent import (
     _answer_comment_if_needed,
+    _build_pr_answer_context,
     _compose_pr_body,
     _create_or_update_issue_pr,
     _ensure_issue_plan_comment,
@@ -44,6 +45,7 @@ class TestCommentQA(unittest.TestCase):
             None,
             None,
             101,
+            "What does this PR change?",
             analysis,
             logger,
         )
@@ -52,6 +54,9 @@ class TestCommentQA(unittest.TestCase):
         client.create_pull_comment.assert_called_once()
         body = client.create_pull_comment.call_args.args[3]
         self.assertIn("<!-- kilo-agent -->", body)
+        self.assertIn("Addressing:", body)
+        self.assertIn("> What does this PR change?", body)
+        self.assertIn("Because it validates the PR.", body)
 
     def test_answer_comment_if_needed_inline_falls_back(self):
         client = MagicMock()
@@ -68,6 +73,7 @@ class TestCommentQA(unittest.TestCase):
             "README.md",
             3,
             102,
+            "Can you explain this line?",
             analysis,
             logger,
         )
@@ -79,6 +85,27 @@ class TestCommentQA(unittest.TestCase):
     def test_compose_pr_body_omits_empty_issue_body(self):
         body = _compose_pr_body("## Summary\nBody", 7, None)
         self.assertEqual(body, "## Summary\nBody\n\nCloses #7")
+
+    def test_build_pr_answer_context_includes_diff_and_files(self):
+        pr = {
+            "number": 12,
+            "title": "Add marker",
+            "body": "Closes #7",
+            "base": {"ref": "main"},
+            "head": {"ref": "feature"},
+        }
+        with patch('subagent._safe_run') as mock_safe_run:
+            mock_safe_run.side_effect = [
+                " README.md | 2 ++\n 1 file changed, 2 insertions(+)",
+                "README.md",
+            ]
+            context = _build_pr_answer_context("/tmp/repo", pr)
+
+        self.assertIn("PR Summary Context:", context)
+        self.assertIn("- pr: #12 Add marker", context)
+        self.assertIn("- diffstat:", context)
+        self.assertIn("- files_changed:", context)
+        self.assertIn("README.md", context)
 
     def test_extract_issue_number_from_pr_prefers_closes_reference(self):
         pr = {
