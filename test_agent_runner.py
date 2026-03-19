@@ -16,9 +16,10 @@ class TestAgentRunner(unittest.TestCase):
 
     @patch('agent_runner.subprocess.run')
     @patch('agent_runner.shutil.which')
-    def test_run_codex_uses_stdin_prompt(self, mock_which, mock_run):
+    @patch('agent_runner.logger')
+    def test_run_codex_uses_stdin_prompt(self, mock_logger, mock_which, mock_run):
         mock_which.return_value = '/usr/bin/codex'
-        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        mock_run.return_value = MagicMock(returncode=0, stderr="OpenAI Codex\n\ntokens used\n1,227\n")
 
         config = SimpleNamespace(
             agent_cli='codex',
@@ -38,6 +39,7 @@ class TestAgentRunner(unittest.TestCase):
         self.assertEqual(args[0][4], '--full-auto')
         self.assertEqual(args[0][-1], '-')
         self.assertEqual(kwargs['input'], prompt)
+        mock_logger.info.assert_any_call("Codex token usage: %s tokens", "1,227")
 
     @patch('agent_runner.subprocess.run')
     @patch('agent_runner.shutil.which')

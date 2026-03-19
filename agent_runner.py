@@ -1,11 +1,15 @@
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
 
 
 logger = logging.getLogger(__name__)
+
+
+_TOKEN_USAGE_RE = re.compile(r"tokens used\s*[:=]?\s*([\d,]+)", re.IGNORECASE)
 
 
 def _ensure_cli_available(cli_name):
@@ -37,6 +41,22 @@ def _run_with_output_file(cmd, prompt, repo_dir, config):
     return result, output_path
 
 
+def _log_token_usage(stderr):
+    if not stderr:
+        return
+
+    match = _TOKEN_USAGE_RE.search(stderr)
+    if not match:
+        return
+
+    try:
+        token_count = int(match.group(1).replace(",", ""))
+    except ValueError:
+        return
+
+    logger.info("Codex token usage: %s tokens", f"{token_count:,}")
+
+
 def run_kilocode(prompt, repo_dir, config):
     _ensure_cli_available("kilocode")
     cmd = ["kilocode"] + config.kilocode_args
@@ -59,6 +79,7 @@ def run_codex(prompt, repo_dir, config):
 
     logger.info("Running codex with args: %s", " ".join(cmd))
     result, output_path = _run_with_output_file(cmd, input_prompt, repo_dir, config)
+    _log_token_usage(result.stderr)
     return result, output_path
 
 
