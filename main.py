@@ -7,6 +7,7 @@ import atexit
 import json
 import psutil
 import sys
+import shutil
 from config import Config
 from gitea_client import GiteaClient
 
@@ -126,8 +127,19 @@ def collect_finished_pids(active_subprocesses, logger):
             logger.warning(f"Could not poll subprocess {pid}: {e}")
     return finished
 
-def spawn_subagent(args):
-    return subprocess.Popen([sys.executable, 'subagent.py'] + args)
+def build_subagent_command(args, config):
+    command = [sys.executable, 'subagent.py'] + args
+    if config.subagent_nice_level is None:
+        return command
+
+    nice_binary = shutil.which('nice')
+    if not nice_binary:
+        return command
+
+    return [nice_binary, '-n', str(config.subagent_nice_level)] + command
+
+def spawn_subagent(args, config):
+    return subprocess.Popen(build_subagent_command(args, config))
 
 def main():
     os.environ['PROCESS_TYPE'] = 'main'
@@ -310,7 +322,7 @@ def main():
 
                         # Spawn subagent
                         try:
-                            proc = spawn_subagent(['--issue', str(issue['number']), repo])
+                            proc = spawn_subagent(['--issue', str(issue['number']), repo], config)
                             active_subprocesses[proc.pid] = {
                                 'proc': proc,
                                 'work_item': 'issue',
@@ -344,7 +356,7 @@ def main():
                             continue
                         if not has_pr_worker and len(active_subprocesses) < config.max_concurrent_subagents:
                             try:
-                                proc = spawn_subagent(['--update-pr', repo, str(pr_number)])
+                                proc = spawn_subagent(['--update-pr', repo, str(pr_number)], config)
                                 active_subprocesses[proc.pid] = {
                                     'proc': proc,
                                     'work_item': 'stale_pr',
@@ -426,9 +438,9 @@ def main():
                             try:
                                 if work_item == 'review_comment':
                                     review_id = comment.get('pull_request_review_id')
-                                    proc = spawn_subagent(['--comment', str(comment['id']), repo, str(pr_number), work_item, str(review_id)])
+                                    proc = spawn_subagent(['--comment', str(comment['id']), repo, str(pr_number), work_item, str(review_id)], config)
                                 else:
-                                    proc = spawn_subagent(['--comment', str(comment['id']), repo, str(pr_number), work_item])
+                                    proc = spawn_subagent(['--comment', str(comment['id']), repo, str(pr_number), work_item], config)
                                 active_subprocesses[proc.pid] = {
                                     'proc': proc,
                                     'work_item': work_item,
@@ -496,16 +508,16 @@ def main():
                     logger.info(f"Retrying {proc_info['work_item']} {proc_info['id']} (attempt {proc_info['retry_count']})")
                     try:
                         if proc_info['work_item'] == 'issue':
-                            proc = spawn_subagent(['--issue', str(proc_info['id']), proc_info['repo']])
+                            proc = spawn_subagent(['--issue', str(proc_info['id']), proc_info['repo']], config)
                         elif proc_info['work_item'] == 'stale_pr':
-                            proc = spawn_subagent(['--update-pr', proc_info['repo'], str(proc_info['id'])])
+                            proc = spawn_subagent(['--update-pr', proc_info['repo'], str(proc_info['id'])], config)
                         else:
                             pr_number = proc_info['pr_number']
                             if proc_info['work_item'] == 'review_comment':
                                 review_id = proc_info['review_id']
-                                proc = spawn_subagent(['--comment', str(proc_info['id']), proc_info['repo'], str(pr_number), proc_info['work_item'], str(review_id)])
+                                proc = spawn_subagent(['--comment', str(proc_info['id']), proc_info['repo'], str(pr_number), proc_info['work_item'], str(review_id)], config)
                             else:
-                                proc = spawn_subagent(['--comment', str(proc_info['id']), proc_info['repo'], str(pr_number), proc_info['work_item']])
+                                proc = spawn_subagent(['--comment', str(proc_info['id']), proc_info['repo'], str(pr_number), proc_info['work_item']], config)
                         proc_info['proc'] = proc
                         # Keep the same pid key? No, new pid.
                         active_subprocesses[proc.pid] = proc_info

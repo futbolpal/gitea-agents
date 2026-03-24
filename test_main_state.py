@@ -6,6 +6,35 @@ import subagent
 
 
 class TestMainState(unittest.TestCase):
+    @patch('main.shutil.which', return_value='/usr/bin/nice')
+    def test_build_subagent_command_uses_nice(self, mock_which):
+        config = MagicMock()
+        config.subagent_nice_level = 10
+
+        command = main.build_subagent_command(['--issue', '1', 'owner/repo'], config)
+
+        self.assertEqual(
+            command,
+            ['/usr/bin/nice', '-n', '10', main.sys.executable, 'subagent.py', '--issue', '1', 'owner/repo'],
+        )
+
+    @patch('main.shutil.which', return_value=None)
+    def test_build_subagent_command_skips_nice_when_unavailable(self, mock_which):
+        config = MagicMock()
+        config.subagent_nice_level = 10
+
+        command = main.build_subagent_command(['--issue', '1', 'owner/repo'], config)
+
+        self.assertEqual(command, [main.sys.executable, 'subagent.py', '--issue', '1', 'owner/repo'])
+
+    def test_build_subagent_command_skips_nice_when_disabled(self):
+        config = MagicMock()
+        config.subagent_nice_level = None
+
+        command = main.build_subagent_command(['--issue', '1', 'owner/repo'], config)
+
+        self.assertEqual(command, [main.sys.executable, 'subagent.py', '--issue', '1', 'owner/repo'])
+
     def test_prune_stale_processes_removes_missing_pid(self):
         active = {
             123: {'proc': None, 'work_item': 'issue', 'id': 1, 'repo': 'owner/repo'}

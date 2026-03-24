@@ -43,6 +43,16 @@ class Config:
         self.workspace_dir = os.getenv('WORKSPACE_DIR', '/workspace')
         self.git_user_name = os.getenv('GIT_USER_NAME', 'kilo-agent')
         self.git_user_email = os.getenv('GIT_USER_EMAIL', 'kilo-agent@localhost')
+        self.subagent_nice_level = self._parse_optional_int(os.getenv('SUBAGENT_NICE_LEVEL', '10'))
+
+    @staticmethod
+    def _parse_optional_int(value):
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            return None
+        return int(stripped)
 
     def setup_logging(self):
         """Setup logging configuration with console and file handlers."""
@@ -109,6 +119,7 @@ class Config:
             "max_context_chars": self.max_context_chars,
             "git_user_name": self.git_user_name,
             "git_user_email": self.git_user_email,
+            "subagent_nice_level": self.subagent_nice_level,
         }
         logger.info("Configuration: %s", config_view)
 
@@ -123,6 +134,8 @@ class Config:
             raise ValueError("AGENT_CLI must be 'kilocode' or 'codex'")
         if self.codex_prompt_mode not in {'stdin', 'arg'}:
             raise ValueError("CODEX_PROMPT_MODE must be 'stdin' or 'arg'")
+        if self.subagent_nice_level is not None and not -20 <= self.subagent_nice_level <= 19:
+            raise ValueError("SUBAGENT_NICE_LEVEL must be between -20 and 19")
         try:
             os.makedirs(self.data_dir, exist_ok=True)
         except Exception as e:

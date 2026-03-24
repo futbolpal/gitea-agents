@@ -87,6 +87,7 @@ Set the following environment variables:
 - `PROMPT_TEMPLATE_PATH`: Path to the prompt template file (default: `prompt_template.txt`)
 - `MAX_CONTEXT_CHARS`: Max characters of repo context injected into prompts (default: `8000`)
 - `WORKSPACE_DIR`: Directory where subagent clones repositories (default: `/workspace`)
+- `SUBAGENT_NICE_LEVEL`: Optional `nice` level applied when launching subagents so descendant CLI processes run at lower priority (default: `10`; set empty to disable)
 
 ## Running
 
