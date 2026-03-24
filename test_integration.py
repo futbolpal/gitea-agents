@@ -75,6 +75,7 @@ class TestIntegration(unittest.TestCase):
             mock_config.polling_frequency = 1
             mock_config.data_dir = self.temp_dir
             mock_config.workspace_dir = self.temp_dir
+            mock_config.subagent_nice_level = 10
             mock_config_class.return_value = mock_config
 
             with patch('main.logging') as mock_logging:
@@ -126,10 +127,11 @@ class TestIntegration(unittest.TestCase):
         self.assertEqual(required_labels[0]['name'], 'agent-working')
         self.assertEqual(required_labels[1]['name'], 'agent-in-review')
 
+    @patch('main.shutil.which', return_value='/usr/bin/nice')
     @patch('subprocess.Popen')
     @patch('main.time.sleep')
     @patch('main.GiteaClient')
-    def test_issue_creation_scenario(self, mock_gitea_client_class, mock_sleep, mock_popen):
+    def test_issue_creation_scenario(self, mock_gitea_client_class, mock_sleep, mock_popen, mock_which):
         """Test the scenario: Handling issue creation."""
         from main import main
         from unittest.mock import MagicMock
@@ -161,6 +163,7 @@ class TestIntegration(unittest.TestCase):
             mock_config.max_concurrent_subagents = 10
             mock_config.data_dir = self.temp_dir
             mock_config.workspace_dir = self.temp_dir
+            mock_config.subagent_nice_level = 10
             mock_config_class.return_value = mock_config
 
             # Mock logging
@@ -180,12 +183,13 @@ class TestIntegration(unittest.TestCase):
         # Should reserve the issue (cleanup not run in test)
         mock_client.update_issue_labels.assert_called_with('owner', 'repo', 1, ['agent-working'])
         # Should spawn subagent
-        mock_popen.assert_called_with([sys.executable, 'subagent.py', '--issue', '1', 'owner/repo'])
+        mock_popen.assert_called_with(['/usr/bin/nice', '-n', '10', sys.executable, 'subagent.py', '--issue', '1', 'owner/repo'])
 
+    @patch('main.shutil.which', return_value='/usr/bin/nice')
     @patch('subprocess.Popen')
     @patch('main.time.sleep')
     @patch('main.GiteaClient')
-    def test_pr_comment_scenario(self, mock_gitea_client_class, mock_sleep, mock_popen):
+    def test_pr_comment_scenario(self, mock_gitea_client_class, mock_sleep, mock_popen, mock_which):
         """Test the scenario: Handling PR comment creation."""
         from main import main
         from unittest.mock import MagicMock
@@ -219,6 +223,7 @@ class TestIntegration(unittest.TestCase):
             mock_config.max_concurrent_subagents = 10
             mock_config.data_dir = self.temp_dir
             mock_config.workspace_dir = self.temp_dir
+            mock_config.subagent_nice_level = 10
             mock_config_class.return_value = mock_config
 
             with patch('main.logging') as mock_logging:
@@ -239,12 +244,13 @@ class TestIntegration(unittest.TestCase):
             call('owner', 'repo', 100, 'heart')
         ])
         # Should spawn subagent
-        mock_popen.assert_called_with([sys.executable, 'subagent.py', '--comment', '100', 'owner/repo', '1', 'pr_comment'])
+        mock_popen.assert_called_with(['/usr/bin/nice', '-n', '10', sys.executable, 'subagent.py', '--comment', '100', 'owner/repo', '1', 'pr_comment'])
 
+    @patch('main.shutil.which', return_value='/usr/bin/nice')
     @patch('subprocess.Popen')
     @patch('main.time.sleep')
     @patch('main.GiteaClient')
-    def test_review_comment_scenario(self, mock_gitea_client_class, mock_sleep, mock_popen):
+    def test_review_comment_scenario(self, mock_gitea_client_class, mock_sleep, mock_popen, mock_which):
         """Test the scenario: Handling Review comment creation."""
         from main import main
         from unittest.mock import MagicMock
@@ -279,6 +285,7 @@ class TestIntegration(unittest.TestCase):
             mock_config.max_concurrent_subagents = 10
             mock_config.data_dir = self.temp_dir
             mock_config.workspace_dir = self.temp_dir
+            mock_config.subagent_nice_level = 10
             mock_config_class.return_value = mock_config
 
             with patch('main.logging') as mock_logging:
@@ -299,7 +306,7 @@ class TestIntegration(unittest.TestCase):
             call('owner', 'repo', 101, 'heart')
         ])
         # Should spawn subagent with review_id
-        mock_popen.assert_called_with([sys.executable, 'subagent.py', '--comment', '101', 'owner/repo', '1', 'review_comment', '200'])
+        mock_popen.assert_called_with(['/usr/bin/nice', '-n', '10', sys.executable, 'subagent.py', '--comment', '101', 'owner/repo', '1', 'review_comment', '200'])
 
     @patch('subprocess.Popen')
     @patch('main.time.sleep')
@@ -343,6 +350,7 @@ class TestIntegration(unittest.TestCase):
             mock_config.max_concurrent_subagents = 10
             mock_config.data_dir = self.temp_dir
             mock_config.workspace_dir = self.temp_dir
+            mock_config.subagent_nice_level = 10
             mock_config_class.return_value = mock_config
 
             with patch('main.logging') as mock_logging:
