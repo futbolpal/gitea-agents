@@ -174,6 +174,20 @@ def _get_git_head(repo_dir):
     except Exception:
         return ""
 
+def _get_git_branch(repo_dir):
+    try:
+        result = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=repo_dir,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        return result.stdout.strip() if result.returncode == 0 else ""
+    except Exception:
+        return ""
+
 def _push_branch(repo_dir, branch, logger):
     def _run_push(args):
         return subprocess.run(
@@ -221,6 +235,107 @@ def _git_output(repo_dir, args):
         text=True,
     )
     return result
+
+def _fetch_all_refs(repo_dir):
+    result = _git_output(repo_dir, ['git', 'fetch', '--all', '--prune'])
+    if result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode,
+            result.args,
+            output=result.stdout,
+            stderr=result.stderr,
+        )
+
+def _is_within_directory(root_dir, candidate_path):
+    root_real = os.path.realpath(root_dir)
+    candidate_real = os.path.realpath(candidate_path)
+    return candidate_real == root_real or candidate_real.startswith(root_real + os.sep)
+
+def _remove_issue_workspace_state(repo_dir):
+    try:
+        os.remove(os.path.join(repo_dir, ISSUE_WORKSPACE_STATE_FILE))
+    except FileNotFoundError:
+        return
+
+def _build_issue_branching_prompt(repo_dir, issue_number, default_branch):
+    state_path = os.path.join(repo_dir, ISSUE_WORKSPACE_STATE_FILE)
+    worktrees_dir = os.path.join(repo_dir, ".worktrees")
+    return (
+        "Before changing code, inspect repository instructions such as AGENTS.md for branch and worktree rules. "
+        "Choose the correct base branch for this issue before you edit files. "
+        f"If the repo instructions require a git worktree, create it under `{worktrees_dir}`. "
+        "Use a dedicated work branch for the implementation, not the base branch itself. "
+        f"If the repo does not specify a branching policy, branch from `{default_branch}` using `fix-issue-{issue_number}`. "
+        f"After choosing the workspace, write JSON to `{state_path}` with keys `workspace_path`, `head_branch`, and `base_branch`. "
+        "Set `workspace_path` to the directory where you made changes. "
+        "Then complete the implementation in that workspace."
+    )
+
+def _load_issue_workspace_state(repo_dir, logger):
+    state_path = os.path.join(repo_dir, ISSUE_WORKSPACE_STATE_FILE)
+    try:
+        with open(state_path, 'r', encoding='utf-8') as handle:
+            data = json.load(handle)
+    except FileNotFoundError as exc:
+        raise ValueError(
+            f"Codex did not write {ISSUE_WORKSPACE_STATE_FILE}; issue work must record the chosen workspace"
+        ) from exc
+    except Exception as exc:
+        raise ValueError(f"Failed to read {ISSUE_WORKSPACE_STATE_FILE}: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise ValueError(f"{ISSUE_WORKSPACE_STATE_FILE} must contain a JSON object")
+
+    workspace_path = data.get("workspace_path") or repo_dir
+    if not isinstance(workspace_path, str) or not workspace_path.strip():
+        raise ValueError(f"{ISSUE_WORKSPACE_STATE_FILE} missing workspace_path")
+    if not os.path.isabs(workspace_path):
+        workspace_path = os.path.join(repo_dir, workspace_path)
+    workspace_path = os.path.realpath(workspace_path)
+    if not _is_within_directory(repo_dir, workspace_path):
+        raise ValueError("Issue workspace path must stay inside the cloned repository root")
+    if not os.path.isdir(workspace_path):
+        raise ValueError(f"Issue workspace path does not exist: {workspace_path}")
+
+    head_branch = data.get("head_branch") or _get_git_branch(workspace_path)
+    if not isinstance(head_branch, str) or not head_branch.strip():
+        raise ValueError(f"{ISSUE_WORKSPACE_STATE_FILE} missing head_branch")
+    head_branch = head_branch.strip()
+
+    base_branch = data.get("base_branch")
+    if not isinstance(base_branch, str) or not base_branch.strip():
+        raise ValueError(f"{ISSUE_WORKSPACE_STATE_FILE} missing base_branch")
+    base_branch = base_branch.strip()
+
+    current_branch = _get_git_branch(workspace_path)
+    if not current_branch:
+        raise ValueError("Issue workspace is not on a branch")
+    if current_branch != head_branch:
+        raise ValueError(
+            f"Issue workspace metadata head_branch={head_branch} does not match current branch {current_branch}"
+        )
+    if head_branch == base_branch:
+        raise ValueError("Issue work must use a dedicated head branch, not the base branch itself")
+
+    logger.info("Loaded issue workspace metadata: branch=%s base=%s path=%s", head_branch, base_branch, workspace_path)
+    return {
+        "workspace_path": workspace_path,
+        "head_branch": head_branch,
+        "base_branch": base_branch,
+    }
+
+def _branch_has_diff_against_base(repo_dir, base_branch):
+    result = _git_output(repo_dir, ['git', 'diff', '--quiet', f'origin/{base_branch}...HEAD'])
+    if result.returncode == 0:
+        return False
+    if result.returncode == 1:
+        return True
+    raise subprocess.CalledProcessError(
+        result.returncode,
+        result.args,
+        output=result.stdout,
+        stderr=result.stderr,
+    )
 
 def _create_branch_from_remote_base(repo_dir, base_branch, head_branch, logger):
     fetch_result = _git_output(repo_dir, ['git', 'fetch', 'origin', base_branch])
@@ -297,6 +412,7 @@ def _comment_merge_failure(client, owner, repo_name, pr_number, base_ref, confli
 
 COMMENT_REPLY_MARKER = "<!-- kilo-agent -->"
 ISSUE_PLAN_COMMENT_MARKER = "<!-- kilo-agent-issue-plan -->"
+ISSUE_WORKSPACE_STATE_FILE = ".kilo-agent-issue-workspace.json"
 
 COMMENT_CLASSIFIER_SYSTEM_PROMPT = (
     "You are a PR comment triage assistant. Return JSON only. "
@@ -724,12 +840,13 @@ def _load_prompt_template(config):
         logger.warning("Failed to load prompt template from %s: %s", path, exc)
         return default_template
 
-def do_work(prompt, repo_dir, config, head_branch):
+def do_work(prompt, repo_dir, config, head_branch=None):
     """Process the prompt and generate code changes."""
     logger = logging.getLogger(__name__)
     logger.info("Starting work...")
-    logger.info(f"Checking out branch {head_branch}")
-    subprocess.run(['git', 'checkout', head_branch], cwd=repo_dir, check=True)
+    if head_branch:
+        logger.info(f"Checking out branch {head_branch}")
+        subprocess.run(['git', 'checkout', head_branch], cwd=repo_dir, check=True)
     # Add instructions for commit and test management
     template = _load_prompt_template(config)
     enhanced_prompt = template.format(prompt=prompt)
@@ -1142,8 +1259,6 @@ def main():
         logger.error(f"Failed to clone repository: {e}")
         sys.exit(1)
 
-    # Perform actual work
-    head_branch = f"fix-issue-{issue_number}"
     try:
         repo_info = client.get_repo(owner, repo_name)
         default_branch = repo_info.get('default_branch', 'main')
@@ -1153,15 +1268,26 @@ def main():
         shutil.rmtree(repo_temp_dir)
         sys.exit(1)
 
-    try:
-        _create_branch_from_remote_base(repo_temp_dir, default_branch, head_branch, logger)
-        logger.info(f"Created and checked out branch {head_branch}")
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Failed to create branch {head_branch}: {e}")
-        shutil.rmtree(repo_temp_dir)
-        sys.exit(1)
+    issue_repo_dir = repo_temp_dir
+    head_branch = f"fix-issue-{issue_number}"
+    base_branch = default_branch
 
-    head_before = _get_git_head(repo_temp_dir)
+    if config.agent_cli != "codex":
+        try:
+            _create_branch_from_remote_base(repo_temp_dir, default_branch, head_branch, logger)
+            logger.info(f"Created and checked out branch {head_branch}")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to create branch {head_branch}: {e}")
+            shutil.rmtree(repo_temp_dir)
+            sys.exit(1)
+    else:
+        try:
+            _fetch_all_refs(repo_temp_dir)
+            _remove_issue_workspace_state(repo_temp_dir)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to prepare repository for codex issue flow: {e}")
+            shutil.rmtree(repo_temp_dir)
+            sys.exit(1)
 
     try:
         context_block = _build_context(repo_temp_dir, config, issue=issue)
@@ -1169,8 +1295,18 @@ def main():
         issue_plan_context = _format_issue_plan_context(
             _get_issue_plan_comment_body(client, owner, repo_name, issue_number, logger)
         )
-        combined_prompt = "\n\n".join(part for part in [issue_plan_context, context_block, issue['body']] if part)
-        do_work(combined_prompt, repo_temp_dir, config, head_branch)
+        prompt_parts = [issue_plan_context, context_block]
+        if config.agent_cli == "codex":
+            prompt_parts.append(_build_issue_branching_prompt(repo_temp_dir, issue_number, default_branch))
+        prompt_parts.append(issue['body'])
+        combined_prompt = "\n\n".join(part for part in prompt_parts if part)
+        do_work(combined_prompt, repo_temp_dir, config, head_branch if config.agent_cli != "codex" else None)
+        if config.agent_cli == "codex":
+            workspace_state = _load_issue_workspace_state(repo_temp_dir, logger)
+            issue_repo_dir = workspace_state["workspace_path"]
+            head_branch = workspace_state["head_branch"]
+            base_branch = workspace_state["base_branch"]
+            _remove_issue_workspace_state(repo_temp_dir)
     except Exception as e:
         logger.error(f"Work failed: {e}")
         shutil.rmtree(repo_temp_dir)
@@ -1179,25 +1315,25 @@ def main():
     # Handle commits and pushing since kilo-code may not do it
     changes_made = False
     try:
-        _ensure_git_identity(repo_temp_dir, config, logger)
+        _ensure_git_identity(issue_repo_dir, config, logger)
         logger.debug("Adding changes to git")
         # Add all changes
-        subprocess.run(['git', 'add', '.'], cwd=repo_temp_dir, check=True)
+        subprocess.run(['git', 'add', '.'], cwd=issue_repo_dir, check=True)
 
         # Check if there are staged changes
-        result = subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=repo_temp_dir)
+        result = subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=issue_repo_dir)
         logger.debug(f"Git diff result: {result.returncode}")
         if result.returncode != 0:  # There are changes
             logger.debug("Committing changes")
             # Commit
-            subprocess.run(['git', 'commit', '-m', f'Fix issue #{issue_number}: {issue["title"]}'], cwd=repo_temp_dir, check=True)
+            subprocess.run(['git', 'commit', '-m', f'Fix issue #{issue_number}: {issue["title"]}'], cwd=issue_repo_dir, check=True)
             logger.info(f"Committed changes for issue {issue_number}")
 
-        head_after = _get_git_head(repo_temp_dir)
-        if head_before and head_after and head_before != head_after:
+        head_after = _get_git_head(issue_repo_dir)
+        if _branch_has_diff_against_base(issue_repo_dir, base_branch):
             logger.debug(f"Pushing branch {head_branch}")
             # Push
-            _push_branch(repo_temp_dir, head_branch, logger)
+            _push_branch(issue_repo_dir, head_branch, logger)
             logger.info(f"Pushed branch {head_branch} to remote")
             changes_made = True
         else:
@@ -1210,7 +1346,7 @@ def main():
     if changes_made:
         try:
             logger.debug(f"Creating PR with head={head_branch}")
-            logger.info(f"Using default branch: {default_branch}")
+            logger.info(f"Using PR base branch: {base_branch}")
             pr = _create_or_update_issue_pr(
                 client,
                 owner,
@@ -1218,8 +1354,8 @@ def main():
                 issue,
                 issue_number,
                 head_branch,
-                default_branch,
-                repo_temp_dir,
+                base_branch,
+                issue_repo_dir,
                 config,
                 logger,
             )

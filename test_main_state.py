@@ -6,6 +6,17 @@ import subagent
 
 
 class TestMainState(unittest.TestCase):
+    @patch('subagent.run_agent')
+    @patch('subagent._load_prompt_template', return_value='{prompt}')
+    @patch('subagent.subprocess.run')
+    def test_do_work_skips_checkout_when_branch_unspecified(self, mock_run, mock_template, mock_run_agent):
+        mock_run_agent.return_value = (MagicMock(returncode=0, stderr=''), '/tmp/output.log')
+
+        subagent.do_work('implement change', '/tmp/repo', MagicMock(), None)
+
+        mock_run.assert_not_called()
+        mock_run_agent.assert_called_once()
+
     @patch('main.shutil.which', return_value='/usr/bin/nice')
     def test_build_subagent_command_uses_nice(self, mock_which):
         config = MagicMock()

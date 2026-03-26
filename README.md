@@ -48,6 +48,7 @@ The runtime has three primary pieces:
 
 - Clone the target repository into a temporary workspace and check out the relevant branch.
 - For issue work, generate and post an `Assessment` and `Plan` comment before implementation when `AGENT_CLI=codex`.
+- For Codex issue work, let Codex inspect repo instructions such as `AGENTS.md`, choose the base branch, and create the implementation branch or worktree before coding.
 - Generate or update code using the configured coding CLI: `kilocode` or `codex`.
 - Open or update pull requests for issue work.
 - Respond to PR comments and review comments, including code changes when needed.
