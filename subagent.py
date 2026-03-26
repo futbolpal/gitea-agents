@@ -205,6 +205,22 @@ def _push_branch(repo_dir, branch, logger):
     message = (result.stderr or result.stdout).strip()
     logger.error("Git push failed: %s", message)
     if any(key in message for key in ("non-fast-forward", "fetch first", "rejected")):
+        fetch = _run_push(['git', 'fetch', 'origin', branch])
+        if fetch.returncode == 0:
+            divergence = _run_push(['git', 'rev-list', '--left-right', '--count', f'HEAD...origin/{branch}'])
+            if divergence.returncode == 0:
+                counts = divergence.stdout.strip().split()
+                if len(counts) == 2:
+                    ahead = int(counts[0])
+                    behind = int(counts[1])
+                    if ahead == 0 and behind > 0:
+                        logger.warning(
+                            "Remote branch %s already has newer commits; fast-forwarding local checkout",
+                            branch,
+                        )
+                        ff_only = _run_push(['git', 'merge', '--ff-only', f'origin/{branch}'])
+                        if ff_only.returncode == 0:
+                            return
         logger.warning("Retrying push with --force-with-lease")
         retry = _run_push(['git', 'push', '--force-with-lease', 'origin', branch])
         if retry.returncode == 0:

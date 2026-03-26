@@ -176,6 +176,12 @@ Run the live issue-plan E2E against `futbolpal/kilo-agents-test`:
 RUN_LIVE_GITEA_E2E=1 python3 -m unittest e2e.test_live_issue_plan_e2e
 ```
 
+Run the live issue branch-flow E2E against `futbolpal/kilo-agents-test`:
+
+```bash
+RUN_LIVE_GITEA_E2E=1 python3 -m unittest e2e.test_live_issue_branch_flow_e2e
+```
+
 Run the live PR comment Q&A E2E against `futbolpal/kilo-agents-test`:
 
 ```bash

@@ -46,6 +46,21 @@ class TestMainState(unittest.TestCase):
 
         self.assertEqual(command, [main.sys.executable, 'subagent.py', '--issue', '1', 'owner/repo'])
 
+    @patch('subagent.subprocess.run')
+    def test_push_branch_accepts_remote_ahead_after_fetch(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=1, stdout="", stderr="rejected", args=['git', 'push', 'origin', 'fix-issue-1']),
+            MagicMock(returncode=0, stdout="", stderr="", args=['git', 'fetch', 'origin', 'fix-issue-1']),
+            MagicMock(returncode=0, stdout="0 1\n", stderr="", args=['git', 'rev-list', '--left-right', '--count', 'HEAD...origin/fix-issue-1']),
+            MagicMock(returncode=0, stdout="", stderr="", args=['git', 'merge', '--ff-only', 'origin/fix-issue-1']),
+        ]
+        logger = MagicMock()
+
+        subagent._push_branch('/tmp/repo', 'fix-issue-1', logger)
+
+        self.assertEqual(mock_run.call_args_list[1].args[0], ['git', 'fetch', 'origin', 'fix-issue-1'])
+        self.assertEqual(mock_run.call_args_list[3].args[0], ['git', 'merge', '--ff-only', 'origin/fix-issue-1'])
+
     def test_prune_stale_processes_removes_missing_pid(self):
         active = {
             123: {'proc': None, 'work_item': 'issue', 'id': 1, 'repo': 'owner/repo'}
