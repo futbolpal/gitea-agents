@@ -1,9 +1,16 @@
 import unittest
+import json
+import os
+import shutil
+import tempfile
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from subagent import (
+    ISSUE_WORKSPACE_STATE_FILE,
+    _build_issue_branching_prompt,
     _build_pr_comment_context,
+    _branch_has_diff_against_base,
     _compose_pr_body,
     _create_or_update_issue_pr,
     _ensure_issue_plan_comment,
@@ -11,6 +18,7 @@ from subagent import (
     _format_issue_plan_context,
     _generate_comment_answer,
     _get_issue_plan_comment_body,
+    _load_issue_workspace_state,
     _post_comment_answer,
     _parse_comment_classification,
     _sanitize_comment_answer,
@@ -18,6 +26,68 @@ from subagent import (
 
 
 class TestCommentQA(unittest.TestCase):
+    def test_build_issue_branching_prompt_mentions_agents_and_metadata(self):
+        prompt = _build_issue_branching_prompt("/tmp/repo", 7, "main")
+
+        self.assertIn("AGENTS.md", prompt)
+        self.assertIn(".kilo-agent-issue-workspace.json", prompt)
+        self.assertIn("fix-issue-7", prompt)
+        self.assertIn("`main`", prompt)
+
+    def test_load_issue_workspace_state_accepts_relative_workspace(self):
+        temp_dir = tempfile.mkdtemp()
+        worktree_dir = os.path.join(temp_dir, ".worktrees", "issue-7")
+        os.makedirs(worktree_dir)
+        state_path = os.path.join(temp_dir, ISSUE_WORKSPACE_STATE_FILE)
+        with open(state_path, "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "workspace_path": ".worktrees/issue-7",
+                    "head_branch": "fix-issue-7",
+                    "base_branch": "release/1.2",
+                },
+                handle,
+            )
+
+        logger = MagicMock()
+        try:
+            with patch("subagent._get_git_branch", return_value="fix-issue-7"):
+                state = _load_issue_workspace_state(temp_dir, logger)
+        finally:
+            shutil.rmtree(temp_dir)
+
+        self.assertEqual(state["workspace_path"], os.path.realpath(worktree_dir))
+        self.assertEqual(state["head_branch"], "fix-issue-7")
+        self.assertEqual(state["base_branch"], "release/1.2")
+
+    def test_load_issue_workspace_state_rejects_outside_repo(self):
+        temp_dir = tempfile.mkdtemp()
+        outside_dir = tempfile.mkdtemp()
+        state_path = os.path.join(temp_dir, ISSUE_WORKSPACE_STATE_FILE)
+        with open(state_path, "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "workspace_path": outside_dir,
+                    "head_branch": "fix-issue-7",
+                    "base_branch": "release/1.2",
+                },
+                handle,
+            )
+
+        logger = MagicMock()
+        try:
+            with self.assertRaisesRegex(ValueError, "inside the cloned repository root"):
+                _load_issue_workspace_state(temp_dir, logger)
+        finally:
+            shutil.rmtree(temp_dir)
+            shutil.rmtree(outside_dir)
+
+    @patch("subagent._git_output")
+    def test_branch_has_diff_against_base(self, mock_git_output):
+        mock_git_output.return_value = MagicMock(returncode=1, stdout="", stderr="", args=["git"])
+
+        self.assertTrue(_branch_has_diff_against_base("/tmp/repo", "main"))
+
     def test_parse_question(self):
         text = '{"classification": "question", "reason": "Asked"}'
         parsed = _parse_comment_classification(text)

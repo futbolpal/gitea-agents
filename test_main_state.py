@@ -6,6 +6,17 @@ import subagent
 
 
 class TestMainState(unittest.TestCase):
+    @patch('subagent.run_agent')
+    @patch('subagent._load_prompt_template', return_value='{prompt}')
+    @patch('subagent.subprocess.run')
+    def test_do_work_skips_checkout_when_branch_unspecified(self, mock_run, mock_template, mock_run_agent):
+        mock_run_agent.return_value = (MagicMock(returncode=0, stderr=''), '/tmp/output.log')
+
+        subagent.do_work('implement change', '/tmp/repo', MagicMock(), None)
+
+        mock_run.assert_not_called()
+        mock_run_agent.assert_called_once()
+
     @patch('main.shutil.which', return_value='/usr/bin/nice')
     def test_build_subagent_command_uses_nice(self, mock_which):
         config = MagicMock()
@@ -34,6 +45,21 @@ class TestMainState(unittest.TestCase):
         command = main.build_subagent_command(['--issue', '1', 'owner/repo'], config)
 
         self.assertEqual(command, [main.sys.executable, 'subagent.py', '--issue', '1', 'owner/repo'])
+
+    @patch('subagent.subprocess.run')
+    def test_push_branch_accepts_remote_ahead_after_fetch(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=1, stdout="", stderr="rejected", args=['git', 'push', 'origin', 'fix-issue-1']),
+            MagicMock(returncode=0, stdout="", stderr="", args=['git', 'fetch', 'origin', 'fix-issue-1']),
+            MagicMock(returncode=0, stdout="0 1\n", stderr="", args=['git', 'rev-list', '--left-right', '--count', 'HEAD...origin/fix-issue-1']),
+            MagicMock(returncode=0, stdout="", stderr="", args=['git', 'merge', '--ff-only', 'origin/fix-issue-1']),
+        ]
+        logger = MagicMock()
+
+        subagent._push_branch('/tmp/repo', 'fix-issue-1', logger)
+
+        self.assertEqual(mock_run.call_args_list[1].args[0], ['git', 'fetch', 'origin', 'fix-issue-1'])
+        self.assertEqual(mock_run.call_args_list[3].args[0], ['git', 'merge', '--ff-only', 'origin/fix-issue-1'])
 
     def test_prune_stale_processes_removes_missing_pid(self):
         active = {

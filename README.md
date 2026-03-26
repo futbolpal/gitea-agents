@@ -48,6 +48,7 @@ The runtime has three primary pieces:
 
 - Clone the target repository into a temporary workspace and check out the relevant branch.
 - For issue work, generate and post an `Assessment` and `Plan` comment before implementation when `AGENT_CLI=codex`.
+- For Codex issue work, let Codex inspect repo instructions such as `AGENTS.md`, choose the base branch, and create the implementation branch or worktree before coding.
 - Generate or update code using the configured coding CLI: `kilocode` or `codex`.
 - Open or update pull requests for issue work.
 - Respond to PR comments and review comments, including code changes when needed.
@@ -173,6 +174,12 @@ Run the live issue-plan E2E against `futbolpal/kilo-agents-test`:
 
 ```bash
 RUN_LIVE_GITEA_E2E=1 python3 -m unittest e2e.test_live_issue_plan_e2e
+```
+
+Run the live issue branch-flow E2E against `futbolpal/kilo-agents-test`:
+
+```bash
+RUN_LIVE_GITEA_E2E=1 python3 -m unittest e2e.test_live_issue_branch_flow_e2e
 ```
 
 Run the live PR comment Q&A E2E against `futbolpal/kilo-agents-test`:
