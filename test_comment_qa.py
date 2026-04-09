@@ -129,9 +129,8 @@ class TestCommentQA(unittest.TestCase):
         self.assertIn("> What does this PR change?", body)
         self.assertIn("Because it validates the PR.", body)
 
-    def test_post_comment_answer_inline_falls_back(self):
+    def test_post_comment_answer_replies_inline_review_thread(self):
         client = MagicMock()
-        client.create_pull_review_comment.side_effect = Exception("boom")
         logger = MagicMock()
 
         posted = _post_comment_answer(
@@ -149,8 +148,39 @@ class TestCommentQA(unittest.TestCase):
         )
 
         self.assertTrue(posted)
-        client.create_pull_review_comment.assert_called_once()
+        client.reply_to_pull_review_comment.assert_called_once()
+        client.create_pull_comment.assert_not_called()
+        body = client.reply_to_pull_review_comment.call_args.args[4]
+        self.assertIn("<!-- kilo-agent -->", body)
+        self.assertIn("Answer text", body)
+        self.assertNotIn("Addressing:", body)
+        self.assertNotIn("> Can you explain this line?", body)
+
+    def test_post_comment_answer_inline_falls_back(self):
+        client = MagicMock()
+        client.reply_to_pull_review_comment.side_effect = Exception("boom")
+        logger = MagicMock()
+
+        posted = _post_comment_answer(
+            client,
+            "owner",
+            "repo",
+            10,
+            "review_comment",
+            "README.md",
+            3,
+            102,
+            "Can you explain this line?",
+            "Answer text",
+            logger,
+        )
+
+        self.assertTrue(posted)
+        client.reply_to_pull_review_comment.assert_called_once()
         client.create_pull_comment.assert_called_once()
+        body = client.create_pull_comment.call_args.args[3]
+        self.assertIn("Addressing:", body)
+        self.assertIn("> Can you explain this line?", body)
 
     def test_sanitize_comment_answer_removes_local_file_links(self):
         answer = "This PR changes [README.md](/tmp/worktree/README.md) and [notes](file:///tmp/worktree/notes.txt)."

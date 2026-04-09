@@ -162,6 +162,18 @@ class GiteaClient:
         logger.info(f"Creating review comment on PR #{pull_number} in {owner}/{repo}")
         return self._make_request('POST', url, json=data)
 
+    def reply_to_pull_review_comment(self, owner, repo, pull_number, comment_id, body):
+        """Reply to an existing inline review comment thread on a pull request."""
+        url = f'{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}/comments'
+        data = {
+            'body': body,
+            'in_reply_to': comment_id,
+        }
+        logger.info(
+            f"Replying to review comment {comment_id} on PR #{pull_number} in {owner}/{repo}"
+        )
+        return self._make_request('POST', url, json=data)
+
     def get_issue(self, owner, repo, issue_number):
         """Get a specific issue."""
         url = f'{self.base_url}/repos/{owner}/{repo}/issues/{issue_number}'

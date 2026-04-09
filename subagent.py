@@ -611,29 +611,30 @@ def _post_comment_answer(
         return None
 
     quoted_comment = (original_comment_body or "").strip()
+    inline_response_body = "\n\n".join([COMMENT_REPLY_MARKER, sanitized_answer])
     response_parts = [COMMENT_REPLY_MARKER]
     if quoted_comment:
         response_parts.append("Addressing:")
         response_parts.append(f"> {quoted_comment.replace(chr(10), chr(10) + '> ')}")
     response_parts.append(sanitized_answer)
-    response_body = "\n\n".join(response_parts)
-    if comment_type == "review_comment" and path and position is not None:
+    fallback_response_body = "\n\n".join(response_parts)
+
+    if comment_type == "review_comment":
         try:
-            client.create_pull_review_comment(
+            client.reply_to_pull_review_comment(
                 owner,
                 repo_name,
                 pr_number,
-                response_body,
-                path=path,
-                position=position,
+                comment_id,
+                inline_response_body,
             )
-            logger.info("Posted inline answer on PR #%s", pr_number)
+            logger.info("Posted inline thread reply on PR #%s", pr_number)
             logger.info("Answered comment %s", comment_id)
             return True
         except Exception as e:
             logger.warning("Inline reply failed, falling back to PR comment: %s", e)
 
-    client.create_pull_comment(owner, repo_name, pr_number, response_body)
+    client.create_pull_comment(owner, repo_name, pr_number, fallback_response_body)
     logger.info("Answered comment %s", comment_id)
     return True
 
