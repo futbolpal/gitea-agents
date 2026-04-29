@@ -164,11 +164,11 @@ class GiteaClient:
 
     def reply_to_pull_review_comment(self, owner, repo, pull_number, comment_id, body):
         """Reply to an existing inline review comment thread on a pull request."""
-        url = f'{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}/comments'
-        data = {
-            'body': body,
-            'in_reply_to': comment_id,
-        }
+        url = (
+            f'{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}/comments/'
+            f'{comment_id}/replies'
+        )
+        data = {'body': body}
         logger.info(
             f"Replying to review comment {comment_id} on PR #{pull_number} in {owner}/{repo}"
         )

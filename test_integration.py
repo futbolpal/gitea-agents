@@ -110,6 +110,24 @@ class TestIntegration(unittest.TestCase):
             'Content-Type': 'application/json'
         })
 
+    @patch('gitea_client.GiteaClient._make_request')
+    @patch('requests.Session')
+    def test_reply_to_pull_review_comment_uses_replies_endpoint(
+        self, mock_session_class, mock_make_request
+    ):
+        """Test inline review replies use the dedicated comment replies endpoint."""
+        mock_session_class.return_value = MagicMock()
+        from gitea_client import GiteaClient
+
+        client = GiteaClient('http://mock.gitea.com', 'mock_token')
+        client.reply_to_pull_review_comment('owner', 'repo', 10, 321, 'Reply body')
+
+        mock_make_request.assert_called_once_with(
+            'POST',
+            'http://mock.gitea.com/repos/owner/repo/pulls/10/comments/321/replies',
+            json={'body': 'Reply body'},
+        )
+
     def test_label_creation(self):
         """Test that required labels are created."""
         from config import Config
