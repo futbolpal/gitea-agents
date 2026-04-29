@@ -127,7 +127,7 @@ The image name is still `kilo-agents` today even though the project name is now 
    ```
 3. Install Codex CLI if you want to run with `AGENT_CLI=codex`:
    ```bash
-   npm install -g @openai/codex@0.112.0
+   npm install -g @openai/codex@0.125.0
    ```
 
 4. Run the agent:
@@ -143,7 +143,7 @@ Codex CLI can authenticate either via browser login (`codex --login`) or by usin
 
 1. Install the CLI:
    ```bash
-   npm install -g @openai/codex@0.112.0
+   npm install -g @openai/codex@0.125.0
    ```
 
 2. Export an API key in the environment (recommended):
