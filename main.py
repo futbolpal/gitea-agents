@@ -73,6 +73,45 @@ def has_unresolved_conflict_comment(client, owner, repo_name, pr_number, logger)
         logger.warning(f"Could not check conflict comments for PR #{pr_number}: {e}")
         return True
 
+def has_mog_comment(client, owner, repo_name, pr_number, logger):
+    """Check if PR has any comment containing '$mog' (merge on green)."""
+    try:
+        comments = client.get_pull_comments(owner, repo_name, pr_number) or []
+        for comment in comments:
+            body = (comment.get('body') or "")
+            if "$mog" in body:
+                comment_id = comment.get('id')
+                logger.info(f"Found $mog comment on PR #{pr_number}: comment_id={comment_id}")
+                return True
+        return False
+    except Exception as e:
+        logger.warning(f"Could not check $mog comments for PR #{pr_number}: {e}")
+        return False
+
+def is_ci_green(client, owner, repo_name, pr_number, logger):
+    """Check if CI status is green for a PR."""
+    try:
+        status = client.get_pull_status(owner, repo_name, pr_number)
+        state = status.get('state')
+        logger.info(f"PR #{pr_number} CI state: {state}")
+        return state == 'success'
+    except Exception as e:
+        logger.warning(f"Could not check CI status for PR #{pr_number}: {e}")
+        return False
+
+def merge_pr_squash(client, owner, repo_name, pr_number, logger):
+    """Merge a PR with a squash commit."""
+    try:
+        pr = client.get_pull_request(owner, repo_name, pr_number)
+        title = pr.get('title', f'Merge PR #{pr_number}')
+        merge_message = f"{title} ( squash)"
+        client.merge_pull_request(owner, repo_name, pr_number, merge_commit_message=merge_message)
+        logger.info(f"Successfully merged PR #{pr_number} with squash")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to merge PR #{pr_number}: {e}")
+        return False
+
 def is_comment_from_bot(comment, config):
     if not isinstance(comment, dict):
         return False
@@ -368,6 +407,14 @@ def main():
                                 logger.info(f"Spawned subagent to update PR #{pr_number} in {repo} (PID: {proc.pid})")
                             except Exception as e:
                                 logger.error(f"Failed to spawn subagent to update PR #{pr_number}: {e}")
+
+                    # Check for $mog (merge on green) comments
+                    if has_mog_comment(client, owner, repo_name, pr_number, logger):
+                        if is_ci_green(client, owner, repo_name, pr_number, logger):
+                            logger.info(f"PR #{pr_number} has $mog comment and CI is green; merging with squash")
+                            merge_pr_squash(client, owner, repo_name, pr_number, logger)
+                        else:
+                            logger.info(f"PR #{pr_number} has $mog comment but CI is not green; skipping merge")
 
                     # Get PR comments
                     comments = client.get_pull_comments(owner, repo_name, pr_number)

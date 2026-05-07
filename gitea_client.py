@@ -241,3 +241,20 @@ class GiteaClient:
         url = f'{self.base_url}/repos/{owner}/{repo}/issues/comments/{comment_id}/reactions'
         logger.debug(f"Getting reactions for comment {comment_id} in {owner}/{repo}")
         return self._make_request('GET', url)
+
+    def get_pull_status(self, owner, repo, pull_number):
+        """Get combined CI status for a pull request."""
+        url = f'{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}/status'
+        logger.debug(f"Getting CI status for PR #{pull_number} in {owner}/{repo}")
+        return self._make_request('GET', url)
+
+    def merge_pull_request(self, owner, repo, pull_number, merge_commit_message=None, do_merge=True):
+        """Merge a pull request. Set do_merge=False to just get the merge status."""
+        url = f'{self.base_url}/repos/{owner}/{repo}/pulls/{pull_number}/merge'
+        data = {}
+        if merge_commit_message:
+            data['message'] = merge_commit_message
+        if do_merge:
+            data['do'] = 'merge'
+        logger.info(f"Merging PR #{pull_number} in {owner}/{repo} (squash={str(do_merge)})")
+        return self._make_request('POST', url, json=data)

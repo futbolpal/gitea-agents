@@ -123,6 +123,38 @@ class TestMainState(unittest.TestCase):
         client.get_comment_reactions.return_value = [{"content": "heart"}]
         self.assertFalse(main.has_unresolved_conflict_comment(client, "owner", "repo", 1, logger))
 
+    def test_has_mog_comment(self):
+        client = MagicMock()
+        client.get_pull_comments.return_value = [
+            {"id": 1, "body": "Looks good to me"},
+            {"id": 2, "body": "Please review $mog when CI passes"},
+        ]
+        logger = MagicMock()
+        self.assertTrue(main.has_mog_comment(client, "owner", "repo", 1, logger))
+
+        client.get_pull_comments.return_value = [{"id": 3, "body": "No mog here"}]
+        self.assertFalse(main.has_mog_comment(client, "owner", "repo", 1, logger))
+
+    def test_is_ci_green(self):
+        client = MagicMock()
+        client.get_pull_status.return_value = {"state": "success"}
+        logger = MagicMock()
+        self.assertTrue(main.is_ci_green(client, "owner", "repo", 1, logger))
+
+        client.get_pull_status.return_value = {"state": "pending"}
+        self.assertFalse(main.is_ci_green(client, "owner", "repo", 1, logger))
+
+        client.get_pull_status.return_value = {"state": "failure"}
+        self.assertFalse(main.is_ci_green(client, "owner", "repo", 1, logger))
+
+    def test_merge_pr_squash(self):
+        client = MagicMock()
+        client.get_pull_request.return_value = {"title": "Fix bug #1"}
+        logger = MagicMock()
+        result = main.merge_pr_squash(client, "owner", "repo", 1, logger)
+        self.assertTrue(result)
+        client.merge_pull_request.assert_called_once_with("owner", "repo", 1, merge_commit_message="Fix bug #1 ( squash)")
+
     @patch('subagent._git_output')
     def test_create_branch_from_remote_base(self, mock_git_output):
         mock_git_output.side_effect = [
